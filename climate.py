@@ -1,41 +1,17 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import (
-    climate,
-    time,
-    sensor,
-    binary_sensor,
-    button,
-    text_sensor,
-    select,
-    gpio,
-    switch
-)
-from esphome import (
-    pins
-)
+from esphome.components import climate, sensor, text_sensor, switch
+from esphome import pins
 from esphome.const import (
-    CONF_CUSTOM_FAN_MODES,
     CONF_ID,
     CONF_NAME,
-    CONF_TEMPERATURE,
-    CONF_OUTDOOR_TEMPERATURE,
     CONF_SENSORS,
-    CONF_SUPPORTED_FAN_MODES,
-    CONF_SUPPORTED_MODES,
     DEVICE_CLASS_TEMPERATURE,
-    DEVICE_CLASS_FREQUENCY,
-    DEVICE_CLASS_HUMIDITY,
     ENTITY_CATEGORY_CONFIG,
-    ENTITY_CATEGORY_NONE,
     STATE_CLASS_MEASUREMENT,
-
     UNIT_CELSIUS,
-    UNIT_HERTZ,
-    UNIT_PERCENT,
     CONF_OUTPUT,
-    CONF_INPUT
-
+    CONF_INPUT,
 )
 from esphome.core import coroutine
 
@@ -72,15 +48,17 @@ CONF_OUT_TEMPERATURE = "out_temperature"
 CONF_DISABLE_ACTIVE_MODE = "disable_active_mode"
 
 hayward_pool_heater_ns = cg.esphome_ns.namespace("hayward_pool_heater")
-PoolHeater = hayward_pool_heater_ns.class_("PoolHeater", cg.Component,climate.Climate)
-ActiveModeSwitch = hayward_pool_heater_ns.class_("ActiveModeSwitch", switch.Switch, cg.Component)
+PoolHeater = hayward_pool_heater_ns.class_("PoolHeater", cg.Component, climate.Climate)
+ActiveModeSwitch = hayward_pool_heater_ns.class_(
+    "ActiveModeSwitch", switch.Switch, cg.Component
+)
 
 BASE_SCHEMA = climate.CLIMATE_SCHEMA.extend(
     {
         cv.GenerateID(CONF_ID): cv.declare_id(PoolHeater),
-        cv.Required(CONF_GPIO_NETPIN): pins.gpio_pin_schema({
-            CONF_OUTPUT: True, CONF_INPUT: True
-        }),        
+        cv.Required(CONF_GPIO_NETPIN): pins.gpio_pin_schema(
+            {CONF_OUTPUT: True, CONF_INPUT: True}
+        ),
         cv.Optional(CONF_NAME, default="Pool Heater"): cv.Any(
             cv.All(
                 cv.none,
@@ -90,14 +68,17 @@ BASE_SCHEMA = climate.CLIMATE_SCHEMA.extend(
             ),
             cv.string,
         ),
-        cv.Optional(CONF_ACTIVE_MODE_SWITCH, default={"name":"Active Mode"}) : switch.switch_schema(
-        ActiveModeSwitch,
-        entity_category=ENTITY_CATEGORY_CONFIG,
-        default_restore_mode="RESTORE_DEFAULT_OFF",
-        icon="mdi:upload-network"),
+        cv.Optional(
+            CONF_ACTIVE_MODE_SWITCH, default={"name": "Active Mode"}
+        ): switch.switch_schema(
+            ActiveModeSwitch,
+            entity_category=ENTITY_CATEGORY_CONFIG,
+            default_restore_mode="RESTORE_DEFAULT_OFF",
+            icon="mdi:upload-network",
+        ),
         cv.Optional(CONF_DISABLE_ACTIVE_MODE, default=True): cv.boolean,
-    
-    })
+    }
+)
 
 
 SENSORS = dict[str, tuple[str, cv.Schema, callable]](
@@ -112,11 +93,32 @@ SENSORS = dict[str, tuple[str, cv.Schema, callable]](
                 icon="mdi:sun-thermometer-outline",
             ),
             sensor.register_sensor,
-        ),        
+        ),
         "actual_status": (
             "Actual Status",
             text_sensor.text_sensor_schema(
                 icon="mdi:heat",
+            ),
+            text_sensor.register_text_sensor,
+        ),
+        "heater_status_code": (
+            "Heater Status",
+            text_sensor.text_sensor_schema(
+                icon="mdi:alert-circle-outline",
+            ),
+            text_sensor.register_text_sensor,
+        ),
+        "heater_status_description": (
+            "Status Description",
+            text_sensor.text_sensor_schema(
+                icon="mdi:information-outline",
+            ),
+            text_sensor.register_text_sensor,
+        ),
+        "heater_status_solution": (
+            "Status Solution",
+            text_sensor.text_sensor_schema(
+                icon="mdi:toolbox-outline",
             ),
             text_sensor.register_text_sensor,
         ),
@@ -144,13 +146,16 @@ CONFIG_SCHEMA = BASE_SCHEMA.extend(
     }
 )
 
+
 @coroutine
 async def to_code(config):
 
     pin_component = await cg.gpio_pin_expression(config[CONF_GPIO_NETPIN])
     max_buffer_count = config[CONF_MAX_BUFFER_COUNT]
-    heater_component = cg.new_Pvariable(config[CONF_ID],pin_component,max_buffer_count)
-    
+    heater_component = cg.new_Pvariable(
+        config[CONF_ID], pin_component, max_buffer_count
+    )
+
     await cg.register_component(heater_component, config)
     await climate.register_climate(heater_component, config)
 
@@ -173,8 +178,8 @@ async def to_code(config):
 
     # Debug Settings
     if dam_conf := config.get(CONF_DISABLE_ACTIVE_MODE):
-        cg.add(getattr(heater_component, "set_passive_mode")( dam_conf))
+        cg.add(getattr(heater_component, "set_passive_mode")(dam_conf))
     if am_switch_conf := config.get(CONF_ACTIVE_MODE_SWITCH):
         switch_component = await switch.new_switch(am_switch_conf)
         await cg.register_component(switch_component, am_switch_conf)
-        await cg.register_parented(switch_component,heater_component)
+        await cg.register_parented(switch_component, heater_component)
