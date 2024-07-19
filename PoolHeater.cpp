@@ -84,6 +84,17 @@ void PoolHeater::set_out_temperature_sensor(sensor::Sensor* sensor) {
 void PoolHeater::set_actual_status_sensor(text_sensor::TextSensor* sensor) {
   this->actual_status_sensor_ = sensor;
 }
+
+void PoolHeater::set_heater_status_code_sensor(text_sensor::TextSensor* sensor) {
+  this->heater_status_code_sensor_ = sensor;
+}
+void PoolHeater::set_heater_status_description_sensor(text_sensor::TextSensor* sensor) {
+  this->heater_status_description_sensor_ = sensor;
+}
+void PoolHeater::set_heater_status_solution_sensor(text_sensor::TextSensor* sensor) {
+  this->heater_status_solution_sensor_ = sensor;
+}
+
 void PoolHeater::loop() { process_state_packets(); }
 void PoolHeater::dump_config() {
   ESP_LOGCONFIG(POOL_HEATER_TAG, "hayward_pool_heater:");
@@ -114,6 +125,16 @@ void PoolHeater::publish_state() {
   }
   if (this->actual_status_sensor_) {
     this->actual_status_sensor_->publish_state(this->actual_status_);
+  }
+
+  if(this->heater_status_code_sensor_){
+    this->heater_status_code_sensor_->publish_state(this->heater_status_.get_code());
+  }
+  if(this->heater_status_description_sensor_){
+    this->heater_status_description_sensor_->publish_state(this->heater_status_.get_description());
+  }
+  if(this->heater_status_solution_sensor_){
+    this->heater_status_solution_sensor_->publish_state(this->heater_status_.get_solution());
   }
 }
 
@@ -149,6 +170,12 @@ void PoolHeater::parse_heater_packet(const DecodingStateFrame& frame) {
                      : climate::CLIMATE_MODE_COOL);
       }
       break;
+      //case FRAME_STATUS:
+      // todo: find the heater status from the packets and call
+      // this->heater_status_.update(status_value);
+      //break;
+      
+      
     default:
       char frametype_msg[61] = {};
       sprintf(frametype_msg, "Unsupported frame type %0x%02X", frame[FRAME_POS_TYPE]);
@@ -276,7 +303,7 @@ bool PoolHeater::get_passive_mode() { return this->passive_mode_; }
  * @brief Get the climate traits.
  * @return The climate traits.
  */
-climate::ClimateTraits traits() override {
+climate::ClimateTraits traits()  {
   auto traits = climate::ClimateTraits();
   traits.set_supports_current_temperature(true);
   traits.set_supports_action(true);

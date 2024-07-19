@@ -2,6 +2,13 @@
 
 This project is a continuation and enhancement of the original work by [njanik](https://github.com/njanik/hayward-pool-heater-mqtt), which focused on interfacing with Hayward pool heaters using MQTT. This new project aims to integrate the Hayward pool heater communication into the ESPHome ecosystem, enabling seamless integration with Home Assistant and providing more control and monitoring capabilities.
 
+## CURRENT PROJECT STATE -- READ FIRST !
+**The code has not yet been tested on a real heat pump controller. I'll update the README when I feel like it works the way I intended. For now, feel free to browse the code but don't upload it unless you feel like you can troubleshoot things on your own.**
+
+** !!! you have been warned !! **
+
+
+
 ## Supported Devices
 
 The following pool heaters have been tested and are known to be compatible with the original work from [njanik]:

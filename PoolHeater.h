@@ -36,11 +36,11 @@
 #pragma once
 
 #include "HPBusDriver.h"
+#include "HeaterStatus.h"
 #include "esphome/core/application.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/macros.h"
-
 
 /**
  * @brief Describes the structure and timing of packets on the NET port.
@@ -99,195 +99,153 @@ extern const char* POOL_HEATER_TAG;
  * @brief Class to handle communication with the pool heater.
  */
 class PoolHeater : public climate::Climate, public Component {
- public:
-  PoolHeater(InternalGPIOPin* gpio_pin, uint8_t max_buffer_count) {
-    this->driver_.set_gpio_pin(gpio_pin);
-    this->driver_.set_max_buffer_count(max_buffer_count);
-  }
+  public:
+    PoolHeater(InternalGPIOPin* gpio_pin, uint8_t max_buffer_count);
 
-  void set_out_temperature_sensor(sensor::Sensor* sensor) {
-    this->out_temperature_sensor_ = sensor;
-  }
-  void set_actual_status_sensor(text_sensor::TextSensor* sensor) {
-    this->actual_status_sensor_ = sensor;
-  }
+    void set_out_temperature_sensor(sensor::Sensor* sensor);
+    void set_actual_status_sensor(text_sensor::TextSensor* sensor);
+    void set_heater_status_code_sensor(text_sensor::TextSensor* sensor);
+    void set_heater_status_description_sensor(text_sensor::TextSensor* sensor);
+    void set_heater_status_solution_sensor(text_sensor::TextSensor* sensor);
 
-  void publish_state();
-  /**
-   * @brief Main loop to process state packets.
-   */
-  void loop() override {
-    process_state_packets();
-  }
+    void publish_state();
+    /**
+     * @brief Main loop to process state packets.
+     */
+    void loop() override;
 
-  /**
-   * @brief Handle control requests from Home Assistant.
-   * @param call The control call.
-   */
-  void control(const climate::ClimateCall& call) override;
+    /**
+     * @brief Handle control requests from Home Assistant.
+     * @param call The control call.
+     */
+    void control(const climate::ClimateCall& call) override;
 
-  /**
-   * @brief Get the climate traits.
-   * @return The climate traits.
-   */
-  climate::ClimateTraits traits() override ;
+    /**
+     * @brief Get the climate traits.
+     * @return The climate traits.
+     */
+    climate::ClimateTraits traits() override;
 
-  /**
-   * @brief Set the temperature out value.
-   * @param temp The temperature out value.
-   */
-  void set_temperature_out(float temp) {
-    this->temperature_out_ = temp;
-    this->publish_state();
-  }
+    /**
+     * @brief Set the temperature out value.
+     * @param temp The temperature out value.
+     */
+    void set_temperature_out(float temp);
 
-  /**
-   * @brief Set the temperature in value.
-   * @param temp The temperature in value.
-   */
-  void set_temperature_in(float temp) {
-    this->current_temperature = temp;
-    this->publish_state();
-  }
+    /**
+     * @brief Set the temperature in value.
+     * @param temp The temperature in value.
+     */
+    void set_temperature_in(float temp);
 
-  /**
-   * @brief Set the target temperature.
-   * @param temp The target temperature.
-   */
-  void set_target_temperature(float temp) {
-    this->target_temperature = temp;
-    this->publish_state();
-  }
+    /**
+     * @brief Set the target temperature.
+     * @param temp The target temperature.
+     */
+    void set_target_temperature(float temp);
 
-  /**
-   * @brief Set the operating mode.
-   * @param mode The operating mode.
-   */
-  void set_mode(climate::ClimateMode mode) {
-    this->mode = mode;
-    this->publish_state();
-  }
+    /**
+     * @brief Set the operating mode.
+     * @param mode The operating mode.
+     */
+    void set_mode(climate::ClimateMode mode);
 
-  /**
-   * @brief Set passive mode.
-   * @param passive True to enable passive mode, false otherwise.
-   */
-  void set_passive_mode(bool passive);
-  bool get_passive_mode();
+    /**
+     * @brief Set passive mode.
+     * @param passive True to enable passive mode, false otherwise.
+     */
+    void set_passive_mode(bool passive);
+    bool get_passive_mode();
 
- protected:
-  HPBusDriver driver_;  ///< The bus driver for communication.
-  float temperature_out_;
-  std::string actual_status_;
-  bool passive_mode_ = true;
-  text_sensor::TextSensor* actual_status_sensor_{nullptr};
-  sensor::Sensor* out_temperature_sensor_{nullptr};
+  protected:
+    HPBusDriver driver_; ///< The bus driver for communication.
+    HeaterStatus heater_status_;
+    float temperature_out_;
+    std::string actual_status_;
+    bool passive_mode_ = true;
+    text_sensor::TextSensor* actual_status_sensor_{nullptr};
+    sensor::Sensor* out_temperature_sensor_{nullptr};
+    text_sensor::TextSensor* heater_status_code_sensor_{nullptr};
+    text_sensor::TextSensor* heater_status_description_sensor_{nullptr};
+    text_sensor::TextSensor* heater_status_solution_sensor_{nullptr};
 
-  /**
-   * @brief Push a command to the heater.
-   * @param temperature The target temperature.
-   * @param mode The operating mode.
-   */
-  void push_command(float temperature, climate::ClimateMode mode) {
-    CommandFrame frame;
+    /**
+     * @brief Push a command to the heater.
+     * @param temperature The target temperature.
+     * @param mode The operating mode.
+     */
+    void push_command(float temperature, climate::ClimateMode mode);
 
-    if (!this->passive_mode_) {
-      if (!serialize_command_frame(&frame, temperature, mode)) {
-        ESP_LOGE(POOL_HEATER_TAG, "Error serializing request");
-        set_actual_status("Serialize error");
-        return;
-      }      
-      if (!this->driver_.queue_frame_data(frame)) {
-        ESP_LOGE(POOL_HEATER_TAG, "Error queuing data frame");
-        set_actual_status("Send Queuing error");
-      }
-    } else {
-      ESP_LOGW(POOL_HEATER_TAG, "Passive mode. Ignoring inbound changes");
-      set_actual_status("Ignored passive mode command");
+    /**
+     * @brief Process state packets received from the heater.
+     */
+    void process_state_packets();
+    void set_actual_status(const std::string status);
+    /**
+     * @brief Serialize a command frame.
+     * @param frameptr Pointer to the command frame.
+     * @param temperature The target temperature.
+     * @param mode The operating mode.
+     * @return True if serialization is successful, false otherwise.
+     */
+    bool serialize_command_frame(
+        CommandFrame* frameptr, float temperature, climate::ClimateMode mode);
+
+    /**
+     * @brief Check if the temperature is valid.
+     * @param temp The temperature to check.
+     * @return True if the temperature is between 15 and 33 degrees, false otherwise.
+     */
+    bool is_temperature_valid(float temp) { return (temp >= 15 && temp <= 33); }
+
+    /**
+     * @brief Parse the temperature from a byte.
+     * @param tempByte The byte containing the temperature.
+     * @return The parsed temperature.
+     */
+    float parse_temperature(uint8_t tempByte);
+
+    /**
+     * @brief Parse a heater packet.
+     * @param frame The frame to parse.
+     */
+    void parse_heater_packet(const DecodingStateFrame& frame);
+    ESPPreferenceObject preferences_;
+    struct PoolHeaterPreferences {
+        bool dummy;
+    };
+    void setup() override;
+    void dump_config() override;
+    void restore_preferences_() {
+        // PoolHeaterPreferences prefs;
+        // if (preferences_.load(&prefs)) {
+        //   // currentTemperatureSource
+        //   if (prefs.currentTemperatureSourceIndex.has_value() &&
+        //       temperature_source_select_->has_index(prefs.currentTemperatureSourceIndex.value())
+        //       &&
+        //       temperature_source_select_->at(prefs.currentTemperatureSourceIndex.value()).has_value())
+        //       {
+        //     current_temperature_source_ =
+        //     temperature_source_select_->at(prefs.currentTemperatureSourceIndex.value()).value();
+        //     temperature_source_select_->publish_state(current_temperature_source_);
+        //     ESP_LOGCONFIG(TAG, "Preferences loaded.");
+        //   } else {
+        //     ESP_LOGCONFIG(TAG, "Preferences loaded, but unsuitable values.");
+        //     current_temperature_source_ = TEMPERATURE_SOURCE_INTERNAL;
+        //     temperature_source_select_->publish_state(TEMPERATURE_SOURCE_INTERNAL);
+        //   }
+        // } else {
+        //   // TODO: Shouldn't need to define setting all these defaults twice
+        //   ESP_LOGCONFIG(TAG, "Preferences not loaded.");
+        //   current_temperature_source_ = TEMPERATURE_SOURCE_INTERNAL;
+        //   temperature_source_select_->publish_state(TEMPERATURE_SOURCE_INTERNAL);
+        // }
     }
-  }
-
-  /**
-   * @brief Process state packets received from the heater.
-   */
-  void process_state_packets() {
-    DecodingStateFrame frame;
-    if (this->driver_.get_next_frame(&frame) && frame.is_valid()) {
-      if (frame.get_source() == SOURCE_HEATER) {
-        parse_heater_packet(frame);
-      }
-      frame.debug_print_hex();
+    void save_preferences_() {
+        // PoolHeaterPreferences prefs{};
+        // preferences_.save(&prefs);
     }
-  }
-  void set_actual_status(const std::string status) {
-    this->actual_status_ = status;
-    ESP_LOGD(POOL_HEATER_TAG,"%s",status.c_str());
-    this->actual_status_sensor_->publish_state(this->actual_status_);
-  }
-  /**
-   * @brief Serialize a command frame.
-   * @param frameptr Pointer to the command frame.
-   * @param temperature The target temperature.
-   * @param mode The operating mode.
-   * @return True if serialization is successful, false otherwise.
-   */
-  bool serialize_command_frame(CommandFrame* frameptr, float temperature,
-                               climate::ClimateMode mode);
-
-  /**
-   * @brief Check if the temperature is valid.
-   * @param temp The temperature to check.
-   * @return True if the temperature is between 15 and 33 degrees, false otherwise.
-   */
-  bool is_temperature_valid(float temp) { return (temp >= 15 && temp <= 33); }
-
-  /**
-   * @brief Parse the temperature from a byte.
-   * @param tempByte The byte containing the temperature.
-   * @return The parsed temperature.
-   */
-  float parse_temperature(uint8_t tempByte);
-
-  /**
-   * @brief Parse a heater packet.
-   * @param frame The frame to parse.
-   */
-  void parse_heater_packet(const DecodingStateFrame& frame);
-  ESPPreferenceObject preferences_;
-  struct PoolHeaterPreferences {
-    bool dummy;
-  };
-  void setup() override ;
-  void dump_config() override;
-  void restore_preferences_() {
-    // PoolHeaterPreferences prefs;
-    // if (preferences_.load(&prefs)) {
-    //   // currentTemperatureSource
-    //   if (prefs.currentTemperatureSourceIndex.has_value() &&
-    //       temperature_source_select_->has_index(prefs.currentTemperatureSourceIndex.value()) &&
-    //       temperature_source_select_->at(prefs.currentTemperatureSourceIndex.value()).has_value())
-    //       {
-    //     current_temperature_source_ =
-    //     temperature_source_select_->at(prefs.currentTemperatureSourceIndex.value()).value();
-    //     temperature_source_select_->publish_state(current_temperature_source_);
-    //     ESP_LOGCONFIG(TAG, "Preferences loaded.");
-    //   } else {
-    //     ESP_LOGCONFIG(TAG, "Preferences loaded, but unsuitable values.");
-    //     current_temperature_source_ = TEMPERATURE_SOURCE_INTERNAL;
-    //     temperature_source_select_->publish_state(TEMPERATURE_SOURCE_INTERNAL);
-    //   }
-    // } else {
-    //   // TODO: Shouldn't need to define setting all these defaults twice
-    //   ESP_LOGCONFIG(TAG, "Preferences not loaded.");
-    //   current_temperature_source_ = TEMPERATURE_SOURCE_INTERNAL;
-    //   temperature_source_select_->publish_state(TEMPERATURE_SOURCE_INTERNAL);
-    // }
-  }
-  void save_preferences_() {
-    // PoolHeaterPreferences prefs{};
-    // preferences_.save(&prefs);
-  }
 };
 
-}  // namespace hayward_pool_heater
-}  // namespace esphome
+} // namespace hayward_pool_heater
+} // namespace esphome
