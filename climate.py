@@ -45,7 +45,6 @@ CONF_ENHANCED_MHK_SUPPORT = (
 CONF_GPIO_NETPIN = "pin_txrx"
 CONF_MAX_BUFFER_COUNT = "max_buffer_count"
 CONF_OUT_TEMPERATURE = "out_temperature"
-CONF_DISABLE_ACTIVE_MODE = "disable_active_mode"
 
 hayward_pool_heater_ns = cg.esphome_ns.namespace("hayward_pool_heater")
 PoolHeater = hayward_pool_heater_ns.class_("PoolHeater", cg.Component, climate.Climate)
@@ -75,8 +74,7 @@ BASE_SCHEMA = climate.CLIMATE_SCHEMA.extend(
             entity_category=ENTITY_CATEGORY_CONFIG,
             default_restore_mode="RESTORE_DEFAULT_OFF",
             icon="mdi:upload-network",
-        ),
-        cv.Optional(CONF_DISABLE_ACTIVE_MODE, default=True): cv.boolean,
+        )
     }
 )
 
@@ -177,8 +175,6 @@ async def to_code(config):
         )
 
     # Debug Settings
-    if dam_conf := config.get(CONF_DISABLE_ACTIVE_MODE):
-        cg.add(getattr(heater_component, "set_passive_mode")(dam_conf))
     if am_switch_conf := config.get(CONF_ACTIVE_MODE_SWITCH):
         switch_component = await switch.new_switch(am_switch_conf)
         await cg.register_component(switch_component, am_switch_conf)

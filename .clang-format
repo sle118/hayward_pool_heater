@@ -1,0 +1,11 @@
+BasedOnStyle: Google
+IndentWidth: 2
+ColumnLimit: 100
+AllowShortFunctionsOnASingleLine: All
+DerivePointerAlignment: false
+PointerAlignment: Left
+BreakBeforeBraces: Attach
+SpacesInParentheses: false
+SpaceAfterCStyleCast: true
+SpaceBeforeParens: ControlStatements
+Standard: Cpp11

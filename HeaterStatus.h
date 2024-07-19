@@ -44,6 +44,7 @@ typedef enum { ERROR_SOURCE_HARDWARE, ERROR_SOURCE_OPERATIONAL } ErrorSources;
 
 // Enum for error statuses
 typedef enum {
+    ERROR_STATUS_S99,
     ERROR_STATUS_S00,
     ERROR_STATUS_P01,
     ERROR_STATUS_P02,
@@ -67,8 +68,8 @@ class ErrorEntry {
   public:
     // Default constructor
     ErrorEntry()
-        : value_(0), code_("S00"), source_(ERROR_SOURCE_OPERATIONAL), status_(ERROR_STATUS_S00),
-          description_("Operational"), solution_("") {}
+        : value_(0), code_("S99"), source_(ERROR_SOURCE_OPERATIONAL), status_(ERROR_STATUS_S99),
+          description_("Waiting For Data"), solution_("") {}
 
     // Constructor with parameters
     ErrorEntry(uint8_t value, std::string code, ErrorSources source, ErrorStatuses status,

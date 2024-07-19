@@ -303,7 +303,7 @@ bool PoolHeater::get_passive_mode() { return this->passive_mode_; }
  * @brief Get the climate traits.
  * @return The climate traits.
  */
-climate::ClimateTraits traits()  {
+climate::ClimateTraits PoolHeater::traits()  {
   auto traits = climate::ClimateTraits();
   traits.set_supports_current_temperature(true);
   traits.set_supports_action(true);
