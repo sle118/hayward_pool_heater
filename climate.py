@@ -1,3 +1,37 @@
+# *
+#  @file climate.py
+#  @brief 
+# 
+#  Copyright (c) 2024 S. Leclerc (sle118@hotmail.com)
+# 
+#  This file is part of the Pool Heater Controller component project.
+# 
+#  @project Pool Heater Controller Component
+#  @developer S. Leclerc (sle118@hotmail.com)
+# 
+#  @license MIT License
+# 
+#  Permission is hereby granted, free of charge, to any person obtaining a copy
+#  of this software and associated documentation files (the "Software"), to deal
+#  in the Software without restriction, including without limitation the rights
+#  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#  copies of the Software, and to permit persons to whom the Software is
+#  furnished to do so, subject to the following conditions:
+# 
+#  The above copyright notice and this permission notice shall be included in all
+#  copies or substantial portions of the Software.
+# 
+#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+#  SOFTWARE.
+# 
+#  @disclaimer Use at your own risk. The developer assumes no responsibility
+#  for any damage or loss caused by the use of this software.
+# 
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import climate, sensor, text_sensor, switch
@@ -12,6 +46,7 @@ from esphome.const import (
     UNIT_CELSIUS,
     CONF_OUTPUT,
     CONF_INPUT,
+    CONF_FILTERS
 )
 from esphome.core import coroutine
 
@@ -27,7 +62,7 @@ AUTO_LOAD = [
     "time",
 ]
 DEPENDENCIES = [
-    "climate",
+    "climate","esp32"
 ]
 CONF_ACTIVE_MODE_SWITCH = "active_mode_switch"
 
@@ -45,6 +80,15 @@ CONF_ENHANCED_MHK_SUPPORT = (
 CONF_GPIO_NETPIN = "pin_txrx"
 CONF_MAX_BUFFER_COUNT = "max_buffer_count"
 CONF_OUT_TEMPERATURE = "out_temperature"
+CONF_TEMPERATURE_SUCTION = "suction_temperature_T01"
+CONF_TEMPERATURE_COIL = "coil_temperature_T04"
+CONF_TEMPERATURE_AMBIENT = "ambient_temperature_T05"
+CONF_TEMPERATURE_EXHAUST = "exhaust_temperature_T06"
+CONF_TEMPERATURE_T1 = "temperature_1"
+CONF_TEMPERATURE_T2 = "temperature_2"
+CONF_TEMPERATURE_T3 = "temperature_3"
+CONF_TEMPERATURE_T4 = "temperature_4"
+
 
 hayward_pool_heater_ns = cg.esphome_ns.namespace("hayward_pool_heater")
 PoolHeater = hayward_pool_heater_ns.class_("PoolHeater", cg.Component, climate.Climate)
@@ -89,9 +133,122 @@ SENSORS = dict[str, tuple[str, cv.Schema, callable]](
                 state_class=STATE_CLASS_MEASUREMENT,
                 accuracy_decimals=1,
                 icon="mdi:sun-thermometer-outline",
+                
             ),
             sensor.register_sensor,
         ),
+CONF_TEMPERATURE_SUCTION:
+(
+    "Suction Temperature",
+    sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1,
+        icon="mdi:sun-thermometer-outline"
+    ),
+    sensor.register_sensor,
+),
+
+CONF_TEMPERATURE_COIL:
+(
+    "Coil Temperature",
+    sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1,
+        icon="mdi:air-conditioner",
+        
+    ),
+    sensor.register_sensor,
+),
+
+CONF_TEMPERATURE_AMBIENT:
+(
+    "Ambient Temperature",
+    sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1,
+        icon="mdi:thermometer",
+        
+    ),
+    sensor.register_sensor,
+),
+
+CONF_TEMPERATURE_EXHAUST:
+(
+    "Exhaust Temperature",
+    sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1,
+        icon="mdi:smoke-detector",
+        
+    ),
+    sensor.register_sensor,
+),
+
+CONF_TEMPERATURE_T1:
+(
+    "Temperature Sensor 1",
+    sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1,
+        icon="mdi:smoke-detector",
+        
+    ),
+    sensor.register_sensor,
+),
+
+CONF_TEMPERATURE_T2:
+(
+    "Temperature Sensor 2",
+    sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1,
+        icon="mdi:smoke-detector",
+        
+    ),
+    sensor.register_sensor,
+),
+
+CONF_TEMPERATURE_T3:
+(
+    "Temperature Sensor 3",
+    sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1,
+        icon="mdi:smoke-detector",
+        
+    ),
+    sensor.register_sensor,
+),
+
+CONF_TEMPERATURE_T4:
+(
+    "Temperature Sensor 4",
+    sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=1,
+        icon="mdi:smoke-detector",
+        
+
+    ),
+    sensor.register_sensor,
+),
+
         "actual_status": (
             "Actual Status",
             text_sensor.text_sensor_schema(
@@ -110,6 +267,7 @@ SENSORS = dict[str, tuple[str, cv.Schema, callable]](
             "Status Description",
             text_sensor.text_sensor_schema(
                 icon="mdi:information-outline",
+                
             ),
             text_sensor.register_text_sensor,
         ),
@@ -127,7 +285,7 @@ SENSORS_SCHEMA = cv.All(
     {
         cv.Optional(
             sensor_designator,
-            default={"name": f"{sensor_name}", "disabled_by_default": "true"},
+            default={"name": f"{sensor_name}","disabled_by_default":"false"},
         ): sensor_schema
         for sensor_designator, (
             sensor_name,

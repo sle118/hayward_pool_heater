@@ -39,39 +39,30 @@
 #include <cstring>  // for std::memcpy
 #include <deque>
 #include <vector>
-#include "esphome/core/gpio.h"
-#include "BusPulse.h"
+#include <iomanip>
+#include <sstream>
+
+
+#include "esphome/components/logger/logger.h"
+
 #include "CommandFrame.h"
 #include "DecodingStateFrame.h"
 #include "SpinLockQueue.h"
+#include "esphome/core/gpio.h"
 #include "esphome/core/helpers.h"
 
 namespace esphome {
 namespace hayward_pool_heater {
-
-// Timing constants (in microseconds)
-// #define BIT_DURATION_US 200
-// #define HEADER_LOW_US (9 * BIT_DURATION_US)
-// #define HEADER_HIGH_US (5 * BIT_DURATION_US)
-// #define BINARY_0_LOW_US (1 * BIT_DURATION_US)
-// #define BINARY_0_HIGH_US (1 * BIT_DURATION_US)
-// #define BINARY_1_LOW_US (1 * BIT_DURATION_US)
-// #define BINARY_1_HIGH_US (3 * BIT_DURATION_US)
-// #define FRAME_SPACING_HIGH_US (100 * BIT_DURATION_US)
-// #define GROUP_SPACING_HIGH_US (500 * BIT_DURATION_US)
-// #define FRAME_END_THRESHOLD_US (50000)
-// #define TRANSMIT_REPEAT_COUNT 8
+static constexpr char TAG_PULSES[] = "hayward_pool_heater.pulses";
 
 extern const uint32_t single_frame_max_duration_ms;
 extern const uint8_t default_frame_transmit_count;
-
-#define FRAME_SIZE 12
 
 /**
  * @enum bus_mode_t
  * @brief Represents the bus mode (transmit or receive).
  */
-typedef enum { BUSMODE_TX, BUSMODE_RX } bus_mode_t;
+typedef enum { BUSMODE_TX, BUSMODE_RX, BUSMODE_ERROR } bus_mode_t;
 
 /**
  * @class HPBusDriver
@@ -93,7 +84,7 @@ class HPBusDriver {
    */
   HPBusDriver(size_t maxWriteLength = 8, size_t transmitCount = default_frame_transmit_count);
   void set_gpio_pin(InternalGPIOPin* gpio_pin) { this->gpio_pin_ = gpio_pin; }
-  void set_max_buffer_count(uint8_t max_buffer_count) { this->maxBufferCount= max_buffer_count; }
+  void set_max_buffer_count(uint8_t max_buffer_count) { this->maxBufferCount = max_buffer_count; }
 
   uint8_t get_max_buffer_count() { return this->maxBufferCount; }
   InternalGPIOPin* get_gpio_pin() { return this->gpio_pin_; }
@@ -101,7 +92,7 @@ class HPBusDriver {
   /**
    * @brief Initializes the bit-banging interface.
    */
-  void setup() ;
+  void setup();
 
   /**
    * @brief Queues frame data for transmission.
@@ -110,11 +101,9 @@ class HPBusDriver {
    * @return true If the frame was successfully queued.
    * @return false If the queue is full.
    */
-  bool queue_frame_data(CommandFrame frame);
-  
-  bool has_next_frame(){
-    return this->received_frames.has_next();
-  }
+  bool queue_frame_data(const CommandFrame &frame);
+
+  bool has_next_frame() { return this->received_frames.has_next(); }
   /**
    * @brief Gets the next frame from the received queue.
    *
@@ -123,29 +112,63 @@ class HPBusDriver {
    * @return false If the queue is empty.
    */
   bool get_next_frame(DecodingStateFrame* frame);
-
-  bool has_controller()  {
-    // we need to consider that we have a controller up until enough time has passed
-    return millis() < delay_between_controller_messages_ms  ||
-      (this->controler_packets_received_.has_value() && this->controler_packets_received_.value());
-  
+  bool is_controller_timeout(){
+    return this->previous_controller_packet_time_.has_value() &&
+          this->previous_controller_packet_time_.value()+(delay_between_controller_messages_ms*1.5)<millis();
   }
+  bool has_controller() {
+    // we need to consider that we have a controller up until enough time has passed,
+    // which could indicate that it has been disconnected
+    return (this->controler_packets_received_.has_value() &&
+            this->controler_packets_received_.value() ) ;
+  }
+  optional<uint32_t> next_controller_packet(){
+    if(this->previous_controller_packet_time_.has_value()){
+      return this->previous_controller_packet_time_.value()+ delay_between_controller_messages_ms;
+    }
+    if(millis()<delay_between_controller_messages_ms){
+      return delay_between_controller_messages_ms;
+    }
+    return {};
+  }
+  bool is_time_for_next(){
+    return !this->previous_sent_packet_.has_value() ||
+          this->previous_sent_packet_.value()+delay_between_sending_messages_ms<=millis();
+  }
+  bus_mode_t get_bus_mode() { return this->mode; }
+    
+
  protected:
   optional<bool> controler_packets_received_;
+  optional<uint32_t> previous_controller_packet_time_;
+  optional<uint32_t> previous_sent_packet_;
   volatile bus_mode_t mode;  ///< The current mode of the bus (transmit or receive).
-  InternalGPIOPin * gpio_pin_{nullptr};
-  TaskHandle_t ioTaskHandle;           ///< Handle to the I/O task.
+  InternalGPIOPin* gpio_pin_{nullptr};
+  TaskHandle_t TxTaskHandle;           ///< Handle to the I/O task.
+  TaskHandle_t RxTaskHandle;           ///< Handle to the I/O task.
   DecodingStateFrame current_frame;    ///< The current frame being processed.
-  uint32_t next_controller_packet_ms;  ///< Timestamp for the next controller packet.
-  uint32_t last_io_change_us;          ///< Timestamp of the last I/O change.
-  uint32_t last_io_high_us;            ///< Timestamp of the last high I/O signal.
-  bool last_io_change_level;           ///< The level of the last I/O change.
   size_t transmit_count;               ///< The number of times to repeat transmission.
   uint8_t maxBufferCount;              ///< Maximum buffer count for the received frames.
   size_t maxWriteLength;               ///< Maximum write length for the transmitted frames.
   SpinLockQueue<DecodingStateFrame> received_frames;  ///< Queue for received frames.
   SpinLockQueue<CommandFrame> tx_packets_queue;       ///< Queue for frames to be transmitted.
-  SpinLockQueue<BusPulse> pulse_queue;                ///< Queue for incoming pulses.
+  rmt_config_t rmt_tx_config_;
+  rmt_config_t rmt_rx_config_;
+  RingbufHandle_t rb_;
+    std::vector<std::string> pulse_strings_;  // Vector to store formatted pulse strings
+  uint64_t last_change_us_;
+  volatile rmt_item32_t current_pulse_;
+  std::map<uint8_t, BaseFrame> packet_map_;
+
+
+
+inline uint64_t elapsed(uint64_t now){
+  if (now >= this->last_change_us_) {
+    return now - this->last_change_us_;
+  } else {
+      return UINT64_MAX - this->last_change_us_ + now + 1;
+  }
+}
 
  private:
   void start_receive();
@@ -157,30 +180,9 @@ class HPBusDriver {
    * spacing between frames and groups. It also manages the transmission count.
    */
   void process_send_queue();
-  /**
-   * @brief Processes a received pulse.
-   *
-   * This function processes a received pulse by updating the current frame's high or low
-   * duration based on the pulse level. It detects start frames, long bits, and short bits,
-   * and handles invalid pulse lengths.
-   *
-   * @param pulse The received pulse to process.
-   */
-  void process_pulse(const BusPulse& pulse);
+  static void isr_handler(HPBusDriver* instance);
 
-  /**
-   * @brief Checks if the last high duration matches the target duration.
-   *
-   * @param target_duration_ms The target duration in milliseconds.
-   * @return true If the last high duration matches the target duration.
-   * @return false Otherwise.
-   */
-  inline bool last_high_duration_matches(uint32_t target_duration_ms) const {
-    auto target_duration_us = target_duration_ms * 1000;
-    return this->last_io_high_us >= (target_duration_us - pulse_duration_threshold_us) &&
-           this->last_io_high_us <= (target_duration_us + pulse_duration_threshold_us);
-  }
-  
+  void isr_handler();
   /**
    * @brief Task function for I/O operations.
    *
@@ -191,7 +193,8 @@ class HPBusDriver {
    *
    * @param arg A pointer to the HPBusDriver instance.
    */
-  static void ioTask(void* arg);
+  static void TxTask(void* arg);
+  static void RxTask(void* arg);
 
   /**
    * @brief Checks if there is enough time to send all packets before the next controller packet.
@@ -205,47 +208,7 @@ class HPBusDriver {
    */
   bool has_time_to_send();
 
-  /**
-   * @brief Interrupt Service Routine (ISR) handler for processing pulses.
-   *
-   * This function is called by the ISR to handle GPIO pin changes. It pushes the changed frames
-   * to a queue that will be processed by the I/O task.
-   *
-   * @param arg A pointer to the HPBusDriver instance.
-   */
-  static void IRAM_ATTR handlePulse(HPBusDriver* arg);
 
-  /**
-   * @brief Internal handler for processing pulses.
-   *
-   * This function processes the pulses detected by the ISR. It records the timestamp and level
-   * of the pulse and enqueues it for processing by the I/O task. If the mode is BUSMODE_TX, it
-   * returns immediately.
-   */
-  void IRAM_ATTR handlePulseInternal();
-
-  /**
-   * @brief Adds the current frame to the received frames queue.
-   *
-   * This function enqueues the current frame into the queue of received frames.
-   */
-  void addReceivedFrame();
-
-  /**
-   * @brief Sends a binary 0 on the bus.
-   *
-   * This function sends a binary 0 signal by setting the bus low for the binary 0 low duration
-   * followed by a short high duration.
-   */
-  void sendBinary0();
-
-  /**
-   * @brief Sends a binary 1 on the bus.
-   *
-   * This function sends a binary 1 signal by setting the bus low for the binary 0 low duration
-   * followed by a long high duration.
-   */
-  void sendBinary1();
 
   /**
    * @brief Sends the start of frame header on the bus.
@@ -295,6 +258,104 @@ class HPBusDriver {
     delayMicroseconds(ms * 1000);
   }
 
+  void process_pulse(rmt_item32_t* item);
+  void finalize_frame(bool timeout);
+
+  
+  std::string format_pulse_item(const rmt_item32_t* item) {
+    if (item == nullptr) {
+      return "";
+    }
+    std::ostringstream oss;
+    uint32_t high_ticks = item->level0 ?  : item->duration1;
+    uint32_t low_ticks = item->level0 ? item->duration1 : item->duration0;
+
+    // if(DecodingStateFrame::is_start_frame(item)){
+    //   oss << "\r\n";
+    // }
+    
+    if(DecodingStateFrame::is_short_bit(item) ||
+      DecodingStateFrame::is_long_bit(item)){
+          oss << "b";
+        }
+        else {
+          oss << (item->level0 ? "H" : "L") << item->duration0 << ":" << (item->level1 ? "H" : "L")<< item->duration1 << " ";
+        }
+    // Store the result in the vector
+    return oss.str();
+  }
+  void log_pulse_item(const rmt_item32_t* item) {
+    if (item == nullptr) {
+      return;
+    }
+
+    auto* log = logger::global_logger;
+    if (log == nullptr || log->level_for(TAG_PULSES) < ESPHOME_LOG_LEVEL_VERBOSE) {
+      return;
+    }
+
+    // Store the result in the vector
+    pulse_strings_.push_back(format_pulse_item(item ));
+  }
+
+void log_pulses()  {
+    if (pulse_strings_.empty()) {
+        return;
+    }
+
+    auto* log = logger::global_logger;
+    if (log == nullptr || log->level_for(TAG_PULSES) < ESPHOME_LOG_LEVEL_VERBOSE) {
+        return;
+    }
+
+    std::string log_chunk = "PULSES:";
+    uint8_t b_count=0;
+    uint8_t B_count=0;
+    uint8_t F_count=0;
+    std::string processed_str;
+    const size_t max_chunk_length = 125;
+
+    
+    for (const auto& str : pulse_strings_) {
+        processed_str="";
+        if (str == "b") {
+            b_count++;
+            if (b_count==8) {  // If we've encountered 8 consecutive 'b's
+                B_count++;
+                b_count=0;
+            }
+            if(B_count==12){
+              F_count++;
+              B_count=0;
+            }
+        } else {
+            processed_str.append(F_count, 'F');
+            processed_str.append(B_count, 'B');
+            processed_str.append(b_count, '.');
+            b_count=0;
+            B_count=0;
+            F_count=0;
+            processed_str += " "+str;
+        }
+      
+        if (log_chunk.length() + processed_str.length() + 1 > max_chunk_length) {
+            ESP_LOGV(TAG_PULSES, "%s", log_chunk.c_str());
+            log_chunk.clear();
+        }
+
+        log_chunk += processed_str;
+    }
+    log_chunk.append(F_count, 'F');
+    log_chunk.append(B_count, 'B');
+    log_chunk.append(b_count, 'b');
+    log_chunk+=" END.";
+    ESP_LOGV(TAG_PULSES, "%s", log_chunk.c_str());
+    reset_pulse_log();
+}
+  bool is_changed(const BaseFrame& frame);
+  void reset_pulse_log() { pulse_strings_.clear(); }
+  void store_frame(const BaseFrame& frame);
+  BaseFrame* get_previous(const BaseFrame& frame);
 };
 
 }  // namespace hayward_pool_heater

@@ -36,27 +36,16 @@
 #ifdef USE_LOGGER
 #include "esphome/components/logger/logger.h"
 #endif
+#include <cmath>
+
 #include "HPUtils.h"
+
 namespace esphome {
 
 namespace hayward_pool_heater {
 
-const char* POOL_HEATER_TAG = "hayward_pool_heater";
-const unsigned char cmdTrame[12] = {
-    FRAME_TYPE_PROG_TEMP,  // 0 - HEADER
-    0xB1,                  // LE: B10001101, BE: B10110001
-    0x17,                  // LE: B11101000, BE: B00010111  POWER &MODE
-    0x06,
-    0x77,  // 4 - TEMP. LE: B11101110, BE: 01110111
-    0x78,  // LE: 00011110, BE: 01111000
-    0x3D,  // LE: 10111100, BE: 00111101
-    0x3D,
-    0x3D,
-    0x3D,
-    0,
-    0,  // 11 - CHECKSUM
-};
-PoolHeater::PoolHeater(InternalGPIOPin* gpio_pin, uint8_t max_buffer_count) {
+const char *POOL_HEATER_TAG = "hayward_pool_heater";
+PoolHeater::PoolHeater(InternalGPIOPin *gpio_pin, uint8_t max_buffer_count) {
   this->driver_.set_gpio_pin(gpio_pin);
   this->driver_.set_max_buffer_count(max_buffer_count);
 }
@@ -71,31 +60,38 @@ void PoolHeater::setup() {
 
   // Using App.get_compilation_time() means these will get reset each time the firmware is
   // updated, but this is an easy way to prevent wierd conflicts if e.g. select options change.
-  preferences_ = global_preferences->make_preference<PoolHeaterPreferences>(
-      get_object_id_hash() ^ fnv1_hash(App.get_compilation_time()));
+  preferences_ = global_preferences->make_preference<PoolHeaterPreferences>(get_object_id_hash() ^
+                                                                            fnv1_hash(App.get_compilation_time()));
   restore_preferences_();
   set_actual_status("Ready");
+
+  this->status_set_warning("Waiting for heater state");
+  this->publish_state();
   ESP_LOGI(POOL_HEATER_TAG, "Setup complete");
 }
 
-void PoolHeater::set_out_temperature_sensor(sensor::Sensor* sensor) {
-  this->out_temperature_sensor_ = sensor;
-}
-void PoolHeater::set_actual_status_sensor(text_sensor::TextSensor* sensor) {
-  this->actual_status_sensor_ = sensor;
-}
+void PoolHeater::set_out_temperature_sensor(sensor::Sensor *sensor) { this->out_temperature_sensor_ = sensor; }
+void PoolHeater::set_actual_status_sensor(text_sensor::TextSensor *sensor) { this->actual_status_sensor_ = sensor; }
 
-void PoolHeater::set_heater_status_code_sensor(text_sensor::TextSensor* sensor) {
+void PoolHeater::set_heater_status_code_sensor(text_sensor::TextSensor *sensor) {
   this->heater_status_code_sensor_ = sensor;
 }
-void PoolHeater::set_heater_status_description_sensor(text_sensor::TextSensor* sensor) {
+void PoolHeater::set_heater_status_description_sensor(text_sensor::TextSensor *sensor) {
   this->heater_status_description_sensor_ = sensor;
 }
-void PoolHeater::set_heater_status_solution_sensor(text_sensor::TextSensor* sensor) {
+void PoolHeater::set_heater_status_solution_sensor(text_sensor::TextSensor *sensor) {
   this->heater_status_solution_sensor_ = sensor;
 }
 
-void PoolHeater::loop() { process_state_packets(); }
+void PoolHeater::loop() {
+  if (this->driver_.get_bus_mode() == BUSMODE_ERROR) {
+    this->status_momentary_error("Bus Error", 5000);
+  }
+  process_state_packets();
+  if (is_heater_offline()) {
+    this->status_set_warning("Heater offline");
+  }
+}
 void PoolHeater::dump_config() {
   ESP_LOGCONFIG(POOL_HEATER_TAG, "hayward_pool_heater:");
   if (this->driver_.get_gpio_pin()) {
@@ -106,16 +102,50 @@ void PoolHeater::dump_config() {
   dump_traits_(POOL_HEATER_TAG);
 }
 
-void PoolHeater::control(const climate::ClimateCall& call) {
+void PoolHeater::control(const climate::ClimateCall &call) {
+  if (!this->command_frame_.has_previous()) {
+    this->Component::status_momentary_warning("Waiting for initial heater state", 5000);
+    return;
+  }
+  ESP_LOGD(POOL_HEATER_TAG, "Base command : ");
+  CommandFrame command_frame = this->command_frame_.get_base_command();
+  command_frame.debug_print_hex();
+
   if (call.get_mode().has_value()) {
     this->mode = *call.get_mode();
+    command_frame.set_mode(this->mode);
   }
 
   if (call.get_target_temperature().has_value()) {
+    if (!is_temperature_valid(*call.get_target_temperature())) {
+      char error_msg[101] = {};
+      sprintf(error_msg, "Invalid temperature %.1d. Must be between 15C and 33C.", *call.get_target_temperature());
+      ESP_LOGE(POOL_HEATER_TAG, "Error setTemp:  %s", error_msg);
+      set_actual_status(error_msg);
+      return;
+    }
     this->target_temperature = *call.get_target_temperature();
+    if (command_frame.packet.tempprog.mode.auto_mode) {
+      command_frame.set_target_temperature_1(this->target_temperature);
+    } else {
+      command_frame.set_target_temperature_2(this->target_temperature);
+    }
   }
 
-  push_command(this->target_temperature, this->mode);
+  if (this->passive_mode_) {
+    ESP_LOGW(POOL_HEATER_TAG, "Passive mode. Ignoring inbound changes");
+    this->status_momentary_warning("Passive mode. Ignoring changes", 5000);
+    this->publish_state();
+    return;
+  }
+  command_frame.set_checksum();
+  ESP_LOGD(POOL_HEATER_TAG, "Command frame before queuing");
+
+  if (!this->driver_.queue_frame_data(command_frame)) {
+    ESP_LOGE(POOL_HEATER_TAG, "Error queuing data frame");
+    this->status_momentary_error("Command queuing error");
+    this->publish_state();
+  }
 }
 void PoolHeater::publish_state() {
   save_preferences_();
@@ -127,120 +157,122 @@ void PoolHeater::publish_state() {
     this->actual_status_sensor_->publish_state(this->actual_status_);
   }
 
-  if(this->heater_status_code_sensor_){
+  if (this->heater_status_code_sensor_) {
     this->heater_status_code_sensor_->publish_state(this->heater_status_.get_code());
   }
-  if(this->heater_status_description_sensor_){
+  if (this->heater_status_description_sensor_) {
     this->heater_status_description_sensor_->publish_state(this->heater_status_.get_description());
   }
-  if(this->heater_status_solution_sensor_){
+  if (this->heater_status_solution_sensor_) {
     this->heater_status_solution_sensor_->publish_state(this->heater_status_.get_solution());
   }
 }
 
-void PoolHeater::parse_heater_packet(const DecodingStateFrame& frame) {
+void PoolHeater::parse_heater_packet(const DecodingStateFrame &frame) {
+  float temperature = 0.0f;
 #ifdef USE_LOGGER
-  auto* log = logger::global_logger;
-  bool debug_status =
-      (log != nullptr && log->level_for(POOL_HEATER_TAG) >= ESPHOME_LOG_LEVEL_DEBUG);
+  auto *log = logger::global_logger;
+  bool debug_status = (log != nullptr && log->level_for(POOL_HEATER_TAG) >= ESPHOME_LOG_LEVEL_DEBUG);
 #else
   bool debug_status = false;
 #endif
   frame_type_t result = frame.get_frame_type();
+
   switch (result) {
-    case FRAME_TYPE_TEMP_OUT:
-      if (debug_status) set_actual_status("Parsing TEMP_OUT frame");
-      set_temperature_out(parse_temperature(frame[FRAME_POS_TEMPOUT]));
+    case FRAME_TEMP_OUT:
+      temperature = BaseFrame::parse_temperature(frame.packet.tempout.temperature);
+      ESP_LOGV(POOL_HEATER_TAG, "Temperature OUT: %2.1fºC", temperature);
+      if (frame.get_source() == SOURCE_HEATER) {
+        set_temperature_out(temperature);
+        this->last_heater_frame_ = millis();
+      }
+
+      //  [[12] D2,B1,11,66,75,52,5F,00,64,00,00,84] TEMP_OUT  (HEATER    ): T: 28.5ºC (0x75), Fan out? T: 11.0ºC
+      //  (0x52), 3?? T: 17.5ºC (0x5f), 4?? T: 20.0ºC (0x64), Res 1-2: [00010001, 01100110], Res 5,7,8:
+      //  [00000000,00000000,00000000]
+
+      this->set_coil_temperature(BaseFrame::parse_temperature(frame.packet.tempout.temperature_coil));
+      this->set_exhaust_temperature(BaseFrame::parse_temperature(frame.packet.tempout.temperature_exhaust));
+      // this->set_temperature_sensor_4(BaseFrame::parse_temperature(frame.packet.tempout.temperature_4));
+
       break;
-    case FRAME_TYPE_TEMP_IN:
-      if (debug_status) set_actual_status("Parsing TEMP_IN frame");
-      set_temperature_in(parse_temperature(frame[FRAME_POS_TEMPIN]));
+    case FRAME_TEMP_IN:
+    case FRAME_TEMP_IN_B:
+      temperature = BaseFrame::parse_temperature(frame.packet.tempin.temperature);
+      ESP_LOGV(POOL_HEATER_TAG, "Temperature IN: %2.1fºC", temperature);
+      if (frame.get_source() == SOURCE_HEATER) {
+        set_temperature_in(temperature);
+        this->last_heater_frame_ = millis();
+      }
+
       break;
     case FRAME_TEMP_PROG:
-      if (debug_status) set_actual_status("Parsing TEMP_PROG frame");
-      this->set_target_temperature(parse_temperature(frame[FRAME_POS_target_temperature]));
-      if (!get_bit(frame[FRAME_POS_MODE], FRAME_STATE_POWER_BIT_BE)) {
-        set_mode(climate::CLIMATE_MODE_OFF);
+      this->command_frame_.save_previous(frame);
+      // Handle the packet based on the source
+      if (frame.get_source() == SOURCE_HEATER) {
+        // this->set_temperature_sensor_1(BaseFrame::parse_temperature(frame.packet.tempprog.set_point_2));
+        // Source is the heater, this is a state report
+        this->last_heater_frame_ = millis();
+
+        // Determine the current action based on the heater state
+        if (!frame.packet.tempprog.mode.power) {
+          ESP_LOGV(POOL_HEATER_TAG, "Power: OFF");
+          action = climate::CLIMATE_ACTION_IDLE;
+        } else {
+          // The heater is on, determine if it's heating or cooling
+          action = frame.packet.tempprog.mode.heat ? climate::CLIMATE_ACTION_HEATING : climate::CLIMATE_ACTION_COOLING;
+        }
+
+        // Set the mode based on the heater's reported mode
+        if (frame.packet.tempprog.mode.auto_mode) {
+          ESP_LOGV(POOL_HEATER_TAG, "Mode: AUTO");
+          set_mode(climate::CLIMATE_MODE_AUTO);
+          ESP_LOGW(POOL_HEATER_TAG, "AUTO mode needs to be investigated to handle climate action reporting");
+        } else {
+          ESP_LOGV(POOL_HEATER_TAG, "Mode: %s", frame.packet.tempprog.mode.heat ? "HEAT" : "COOL");
+          set_mode(frame.packet.tempprog.mode.heat ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_COOL);
+        }
+        if (frame.packet.tempprog.mode.auto_mode) {
+          temperature = BaseFrame::parse_temperature(frame.packet.tempprog.set_point_1);
+        } else {
+          temperature = BaseFrame::parse_temperature(frame.packet.tempprog.set_point_2);
+        }
+
+        ESP_LOGV(POOL_HEATER_TAG, "Temperature PROG : %2.1fºC", temperature);
+        this->set_target_temperature(temperature);
+      } else if (frame.get_source() == SOURCE_CONTROLLER) {
+        // Source is the controller (keypad), this is a user request
+
+        // Update the mode based on the user's request
+        if (!frame.packet.tempprog.mode.power) {
+          ESP_LOGW(POOL_HEATER_TAG, "User requested Power: OFF");
+          set_mode(climate::CLIMATE_MODE_OFF);
+        } else {
+          if (frame.packet.tempprog.mode.auto_mode) {
+            ESP_LOGW(POOL_HEATER_TAG, "User requested Mode: AUTO");
+            set_mode(climate::CLIMATE_MODE_AUTO);
+          } else {
+            ESP_LOGW(POOL_HEATER_TAG, "User requested Mode: %s", frame.packet.tempprog.mode.heat ? "HEAT" : "COOL");
+            set_mode(frame.packet.tempprog.mode.heat ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_COOL);
+          }
+        }
       }
-      if (get_bit(frame[FRAME_POS_MODE], FRAME_MODE_AUTO_BIT_BE)) {
-        set_mode(climate::CLIMATE_MODE_AUTO);
-      } else {
-        set_mode(get_bit(frame[FRAME_POS_MODE], FRAME_MODE_HEAT_BIT_BE)
-                     ? climate::CLIMATE_MODE_HEAT
-                     : climate::CLIMATE_MODE_COOL);
-      }
+
       break;
-      //case FRAME_STATUS:
-      // todo: find the heater status from the packets and call
-      // this->heater_status_.update(status_value);
-      //break;
-      
-      
+
+      // case FRAME_STATUS:
+      //  todo: find the heater status from the packets and call
+      //  this->heater_status_.update(status_value);
+      // break;
+
     default:
       char frametype_msg[61] = {};
-      sprintf(frametype_msg, "Unsupported frame type %0x%02X", frame[FRAME_POS_TYPE]);
-      ESP_LOGW(POOL_HEATER_TAG, "%s", frametype_msg);
-      set_actual_status(frametype_msg);
+      sprintf(frametype_msg, "Unsupported frame type 0x%02X", frame.packet.frame_type);
+      ESP_LOGV(POOL_HEATER_TAG, "%s", frametype_msg);
+      // set_actual_status(frametype_msg);
       break;
   }
-}
-
-float PoolHeater::parse_temperature(uint8_t tempByte) {
-  float halfDeg = get_bit(tempByte, FRAME_TEMP_HALF_DEG_BIT_BE) ? 0.5f : 0.0f;
-  return ((tempByte & FRAME_TEMP_MASK_BE) >> 1) + 2 + halfDeg;
-}
-
-bool PoolHeater::serialize_command_frame(CommandFrame* frameptr, float temperature,
-                                         climate::ClimateMode mode) {
-  CommandFrame& frame = *frameptr;
-  frame = cmdTrame;
-  frame[FRAME_POS_TYPE] = FRAME_TYPE_PROG_TEMP;
-  frame[1] = 0xB1;
-  frame[FRAME_POS_target_temperature] = DEFAULT_TEMP_MASK_BE;
-  frame[FRAME_POS_MODE] = DEFAULT_POWERMODE_MASK_BE;
-
-  if (!is_temperature_valid(temperature)) {
-    char error_msg[101] = {};
-    sprintf(error_msg, "Invalid temperature %.1d. Must be between 15C and 33C.", temperature);
-    ESP_LOGE(POOL_HEATER_TAG, "Error setTemp:  %s", error_msg);
-    set_actual_status(error_msg);
-    return false;
-  }
-  clear_bit(&frame[FRAME_POS_MODE], FRAME_MODE_AUTO_BIT_BE);
-  clear_bit(&frame[FRAME_POS_MODE], FRAME_MODE_HEAT_BIT_BE);
-  clear_bit(&frame[FRAME_POS_MODE], FRAME_STATE_POWER_BIT_BE);
-
-  if (mode != climate::CLIMATE_MODE_OFF) {
-    set_bit(&frame[FRAME_POS_MODE], FRAME_STATE_POWER_BIT_BE);
-
-    switch (mode) {
-      case climate::CLIMATE_MODE_AUTO:
-        set_bit(&frame[FRAME_POS_MODE], FRAME_MODE_AUTO_BIT_BE);
-        break;
-      case climate::CLIMATE_MODE_HEAT:
-        set_bit(&frame[FRAME_POS_MODE], FRAME_MODE_HEAT_BIT_BE);
-        break;
-      case climate::CLIMATE_MODE_COOL:
-      default:
-        break;
-    }
-
-    float target_temperature = temperature;
-    bool halfDegree = ((target_temperature * 10) - (target_temperature * 10)) > 0;
-    uint8_t value = target_temperature - 2;
-    frame[FRAME_POS_target_temperature] = frame[FRAME_POS_target_temperature] | (value << 1);
-    if (halfDegree) {
-      set_bit(&frame[FRAME_POS_target_temperature], FRAME_TEMP_HALF_DEG_BIT_BE);
-    }
-    if (frame.size() < FRAME_SIZE) {
-      frame.append_checksum();
-    } else {
-      frame.set_checksum();
-    }
-    return true;
-  }
-
-  return false;
+  this->publish_state();
 }
 
 void PoolHeater::set_temperature_in(float temp) {
@@ -252,39 +284,25 @@ void PoolHeater::set_target_temperature(float temp) {
   this->publish_state();
 }
 
-
-void PoolHeater::set_actual_status(const std::string status) {
-  this->actual_status_ = status;
-  ESP_LOGD(POOL_HEATER_TAG, "%s", status.c_str());
-  this->actual_status_sensor_->publish_state(this->actual_status_);
+void PoolHeater::set_actual_status(const std::string status, bool force) {
+  if (this->actual_status_ != status || force) {
+    ESP_LOGD(POOL_HEATER_TAG, "%s", status.c_str());
+    this->actual_status_ = status;
+    this->actual_status_sensor_->publish_state(this->actual_status_);
+  }
 }
+
 void PoolHeater::process_state_packets() {
   DecodingStateFrame frame;
-  if (this->driver_.get_next_frame(&frame) && frame.is_valid()) {
-    if (frame.get_source() == SOURCE_HEATER) {
-      parse_heater_packet(frame);
-    }
-    frame.debug_print_hex();
-  }
-}
-void PoolHeater::push_command(float temperature, climate::ClimateMode mode) {
-  CommandFrame frame;
 
-  if (!this->passive_mode_) {
-    if (!serialize_command_frame(&frame, temperature, mode)) {
-      ESP_LOGE(POOL_HEATER_TAG, "Error serializing request");
-      set_actual_status("Serialize error");
-      return;
+  if (this->driver_.get_next_frame(&frame)) {
+    if (!frame.is_valid()) {
+      ESP_LOGW(POOL_HEATER_TAG, "Invalid frame");
     }
-    if (!this->driver_.queue_frame_data(frame)) {
-      ESP_LOGE(POOL_HEATER_TAG, "Error queuing data frame");
-      set_actual_status("Send Queuing error");
-    }
-  } else {
-    ESP_LOGW(POOL_HEATER_TAG, "Passive mode. Ignoring inbound changes");
-    set_actual_status("Ignored passive mode command");
+    parse_heater_packet(frame);
   }
 }
+
 void PoolHeater::set_mode(climate::ClimateMode mode) {
   this->mode = mode;
   this->publish_state();
@@ -303,7 +321,7 @@ bool PoolHeater::get_passive_mode() { return this->passive_mode_; }
  * @brief Get the climate traits.
  * @return The climate traits.
  */
-climate::ClimateTraits PoolHeater::traits()  {
+climate::ClimateTraits PoolHeater::traits() {
   auto traits = climate::ClimateTraits();
   traits.set_supports_current_temperature(true);
   traits.set_supports_action(true);

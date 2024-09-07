@@ -36,6 +36,8 @@
 #pragma once
 
 #include "base_frame.h"
+#include "esphome/components/climate/climate.h"
+#include "esphome/core/application.h"
 namespace esphome {
 namespace hayward_pool_heater {
 
@@ -51,21 +53,60 @@ class CommandFrame : public BaseFrame {
   /**
    * @brief Default constructor. Initializes the transmit bit index.
    */
-  CommandFrame() : BaseFrame(), transmitBitIndex(0) {}
+  CommandFrame() : BaseFrame(), transmitBitIndex(0) { this->previous_frame_.reset(); }
+  CommandFrame(const BaseFrame &base) : BaseFrame(base) {}
+  template<size_t N> CommandFrame(const unsigned char (&cmdTrame)[N]) : BaseFrame(cmdTrame) {}
+  void save_previous(const BaseFrame &base) { this->previous_frame_ = base; }
+  BaseFrame get_base_command() {
+    BaseFrame frame;
+    if (!this->previous_frame_.has_value()) {
+      frame = model_cmd;
+    }
+    frame = this->previous_frame_.value();
+    frame.set_source(SOURCE_CONTROLLER);
+    return frame;
+  }
+  bool has_previous() const { return this->previous_frame_.has_value(); }
+
+  void reset() {
+    packet.tempprog.mode.auto_mode = false;
+    packet.tempprog.mode.heat = false;
+    packet.tempprog.mode.power = false;
+  }
+  void set_target_temperature_1(float temperature) {
+    BaseFrame::set_temperature(packet.tempprog.set_point_1, temperature);
+  }
+  void set_target_temperature_2(float temperature) {
+    BaseFrame::set_temperature(packet.tempprog.set_point_2, temperature);
+  }
+  void set_mode(climate::ClimateMode mode) {
+    packet.tempprog.mode.power = true;
+    switch (mode) {
+      case climate::CLIMATE_MODE_AUTO:
+        packet.tempprog.mode.auto_mode = true;
+        break;
+      case climate::CLIMATE_MODE_HEAT:
+        packet.tempprog.mode.heat = true;
+        break;
+      case climate::CLIMATE_MODE_COOL:
+      default:
+        packet.tempprog.mode.power = false;
+        break;
+    }
+  }
 
   /**
    * @brief Template copy assignment operator to accept an array of unsigned char of any length.
    * @param cmdTrame The array to copy from.
    * @return Reference to the assigned CommandFrame object.
    */
-  template <size_t N>
-  CommandFrame& operator=(const unsigned char (&cmdTrame)[N]) {
+  template<size_t N> CommandFrame &operator=(const unsigned char (&cmdTrame)[N]) {
     BaseFrame::operator=(cmdTrame);
     return *this;
   }
-
   size_t transmitBitIndex;  ///< Index of the bit to be transmitted.
+  optional<BaseFrame> previous_frame_;
 };
 
 }  // namespace hayward_pool_heater
-}
+}  // namespace esphome

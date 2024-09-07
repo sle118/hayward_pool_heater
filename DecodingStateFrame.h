@@ -35,31 +35,15 @@
  */
 
 #pragma once
-
+#include <map>
+#include <cstring>
+#include "esphome/core/log.h"
 #include "HPUtils.h"
+#include "base_frame.h"
+
 namespace esphome {
 namespace hayward_pool_heater {
-
-// constexpr size_t MAX_FRAME_LENGTH = 40;
-
-// Frame Types and Positions
-// constexpr uint8_t FRAME_TYPE_TEMP_OUT = 0x4B;   // B01001011 (inv: 11010010)
-// constexpr uint8_t FRAME_TYPE_TEMP_IN = 0x8B;    // B10001011 (inv: 11010001)
-// constexpr uint8_t FRAME_TYPE_PROG_TEMP = 0x81;  // B10000001 (inv: 10000001)
-// constexpr uint8_t FRAME_POS_TYPE = 0;
-// constexpr uint8_t FRAME_POS_TEMPOUT = 4;
-
-
-
-// extern const uint8_t heater_packet_length_bytes;
-// extern const uint32_t controler_group_spacing_ms;
-// extern const uint32_t controler_frame_spacing_duration_ms;
-// extern const uint32_t heater_frame_spacing_duration_ms;
-// extern const uint32_t frame_heading_low_duration_ms;
-// extern const uint32_t frame_heading_high_duration_ms;
-// extern const uint32_t bit_short_high_duration_ms;
-// extern const uint32_t bit_long_high_duration_ms;
-// extern const uint32_t bit_low_duration_ms;
+static constexpr char TAG_DECODING[] = "hayward_pool_heater.decoder";
 
 /**
  * @class DecodingStateFrame
@@ -74,33 +58,20 @@ class DecodingStateFrame : public BaseFrame {
    * @brief Constructs a new DecodingStateFrame object.
    */
   DecodingStateFrame()
-      : BaseFrame(),
-        frameIndex(0),
-        currentByte(0),
-        bit_current_index(0),
-        lastHighStart(0),
-        lastLowStart(0),
-        lastHighDuration(0),
-        lastLowDuration(0),
-        started(false),
-        finalized(false) {}
+      : BaseFrame(), currentByte(0), bit_current_index(0), started(false), finalized(false), passes_count(0) {}
 
   /**
    * @brief Copy constructor for DecodingStateFrame.
    *
    * @param other The DecodingStateFrame object to copy from.
    */
-  DecodingStateFrame(const DecodingStateFrame& other)
+  DecodingStateFrame(const DecodingStateFrame &other)
       : BaseFrame(other),
-        frameIndex(other.frameIndex),
         currentByte(other.currentByte),
         bit_current_index(other.bit_current_index),
-        lastHighStart(other.lastHighStart),
-        lastLowStart(other.lastLowStart),
-        lastHighDuration(other.lastHighDuration),
-        lastLowDuration(other.lastLowDuration),
         started(other.started),
-        finalized(other.finalized) {}
+        finalized(other.finalized),
+        passes_count(0) {}
 
   /**
    * @brief Copy assignment operator for DecodingStateFrame.
@@ -108,18 +79,14 @@ class DecodingStateFrame : public BaseFrame {
    * @param other The DecodingStateFrame object to copy from.
    * @return Reference to the assigned DecodingStateFrame object.
    */
-  DecodingStateFrame& operator=(const DecodingStateFrame& other) {
+  DecodingStateFrame &operator=(const DecodingStateFrame &other) {
     if (this != &other) {
       BaseFrame::operator=(other);
-      frameIndex = other.frameIndex;
       currentByte = other.currentByte;
       bit_current_index = other.bit_current_index;
-      lastHighStart = other.lastHighStart;
-      lastLowStart = other.lastLowStart;
-      lastHighDuration = other.lastHighDuration;
-      lastLowDuration = other.lastLowDuration;
       started = other.started;
       finalized = other.finalized;
+      passes_count = other.passes_count;
     }
     return *this;
   }
@@ -127,16 +94,28 @@ class DecodingStateFrame : public BaseFrame {
   /**
    * @brief Resets the current frame state.
    */
-  void reset() {
-    frameIndex = 0;
+  void reset(const char *msg = "") {
+#ifdef USE_LOGGER
+    auto *log = logger::global_logger;
+    bool debug_status = (log != nullptr && log->level_for(TAG_DECODING) >= ESPHOME_LOG_LEVEL_VERY_VERBOSE);
+#else
+    bool debug_status = false;
+#endif
+
+    if (this->started) {
+      ESP_LOGVV(TAG_DECODING, "Resetting frame");
+      if (debug_status && strlen(msg) > 0) {
+        debug(msg);
+      }
+    }
+    passes_count = 0;
     bit_current_index = 0;
+    data_len_ = 0;
     currentByte = 0;
-    lastHighDuration = 0;
-    lastLowDuration = 0;
     started = false;
     finalized = false;
     source_ = SOURCE_UNKNOWN;
-    buffer.clear();
+    memset(&packet, 0x00, sizeof(packet));
   }
 
   /**
@@ -146,23 +125,28 @@ class DecodingStateFrame : public BaseFrame {
    * @return false Otherwise.
    */
   bool finalize() {
-    if (frameIndex == 0) {
+    bool inverted = false;
+    this->source_ = SOURCE_UNKNOWN;
+    this->finalized = false;
+    if (!started) {
       return false;
     }
-    if (!validateChecksum()) {
-      inverseLevels();
-      if (validateChecksum()) {
-        source_ = SOURCE_HEATER;
-        finalized = true;
-        return true;
-      }
-    } else {
-      source_ = SOURCE_CONTROLLER;
-      finalized = true;
-      return true;
+    if (!this->is_size_valid()) {
+      return false;
     }
-    source_ = SOURCE_UNKNOWN;
-    return false;
+
+    if (is_checksum_valid(inverted)) {
+      if (inverted) {
+        inverseLevels();
+        this->source_ = SOURCE_HEATER;
+      } else {
+        this->source_ = SOURCE_CONTROLLER;
+      }
+      finalized = true;
+      frame_time_ms_ = millis();
+    }
+    ESP_LOGVV(TAG_DECODING, "Finalize()->frame is %s", this->finalized ? "FINALIZED" : "NOT FINALIZED");
+    return this->finalized;
   }
 
   /**
@@ -171,9 +155,7 @@ class DecodingStateFrame : public BaseFrame {
    * @return true If the frame is valid.
    * @return false Otherwise.
    */
-  bool is_valid() const {
-    return (source_ != SOURCE_UNKNOWN && finalized && BaseFrame::is_valid());
-  }
+  bool is_valid() const { return (finalized && BaseFrame::is_valid()); }
 
   /**
    * @brief Appends a bit to the current byte in the frame.
@@ -182,6 +164,7 @@ class DecodingStateFrame : public BaseFrame {
    */
   void append_bit(bool long_duration) {
     if (!started) {
+      ESP_LOGW(TAG_DECODING, "Frame not started. Ignoring bit");
       return;
     }
     if (long_duration) {
@@ -189,9 +172,16 @@ class DecodingStateFrame : public BaseFrame {
     }
     bit_current_index++;
     if (bit_current_index == 8) {
-      buffer.push_back(currentByte);
+      if (this->data_len_ < sizeof(this->packet.data)) {
+        ESP_LOGVV(TAG_DECODING, "New byte #%d: 0X%02X", this->data_len_, currentByte);
+        this->packet.data[this->data_len_] = currentByte;
+      } else {
+        ESP_LOGW(TAG_DECODING, "Frame overflow %d/%d. New byte: 0X%2X", this->data_len_, sizeof(this->packet.data),
+                 currentByte);
+      }
       bit_current_index = 0;
       currentByte = 0;
+      this->data_len_++;
     }
   }
 
@@ -199,95 +189,34 @@ class DecodingStateFrame : public BaseFrame {
    * @brief Starts a new frame.
    */
   void start_new_frame() {
-    reset();
+    reset("Start of new frame");
     started = true;
   }
-
-  /**
-   * @brief Checks if the current frame is a start frame.
-   *
-   * @return true If the current frame is a start frame.
-   * @return false Otherwise.
-   */
-  bool is_start_frame() const {
-    return last_low_duration_matches(frame_heading_low_duration_ms) &&
-           last_high_duration_matches(frame_heading_high_duration_ms);
+  static int32_t get_high_duration(const rmt_item32_t *item) {
+    return item->level0 ? item->duration0 : item->level1 ? item->duration1 : 0;
+  }
+  static uint32_t get_low_duration(const rmt_item32_t *item) {
+    return !item->level0 ? item->duration0 : !item->level1 ? item->duration1 : 0;
+    ;
+  }
+  static bool matches_duration(uint32_t target_us, uint32_t actual_us) {
+    return actual_us >= (target_us - pulse_duration_threshold_us) &&
+           actual_us <= (target_us + pulse_duration_threshold_us);
+  }
+  static bool is_start_frame(const rmt_item32_t *item) {
+    // return matches_duration(get_low_duration(item), frame_heading_low_duration_ms * 1000) &&
+    return matches_duration(get_high_duration(item), frame_heading_high_duration_ms * 1000);
   }
 
-  /**
-   * @brief Checks if the pulse represents a long bit.
-   *
-   * @return true If the pulse is a long bit.
-   * @return false Otherwise.
-   */
-  inline bool is_long_bit() const { return last_high_duration_matches(bit_long_high_duration_ms); }
-
-  /**
-   * @brief Checks if the pulse represents a short bit.
-   *
-   * @return true If the pulse is a short bit.
-   * @return false Otherwise.
-   */
-  inline bool is_short_bit() const {
-    return last_high_duration_matches(bit_short_high_duration_ms);
+  static bool is_long_bit(const rmt_item32_t *item) {
+    return matches_duration(get_high_duration(item), bit_long_high_duration_ms * 1000) &&
+           matches_duration(get_low_duration(item), bit_low_duration_ms * 1000);
   }
 
-  /**
-   * @brief Gets the duration of the last high pulse.
-   *
-   * @return The duration of the last high pulse in microseconds.
-   */
-  uint32_t get_last_high_duration() const { return lastHighDuration; }
-
-  /**
-   * @brief Sets the duration of the last high pulse.
-   *
-   * @param duration The duration of the last high pulse in microseconds.
-   */
-  void set_last_high_duration(uint32_t duration) { lastHighDuration = duration; }
-
-  /**
-   * @brief Gets the duration of the last low pulse.
-   *
-   * @return The duration of the last low pulse in microseconds.
-   */
-  uint32_t get_last_low_duration() const { return lastLowDuration; }
-
-  /**
-   * @brief Sets the duration of the last low pulse.
-   *
-   * @param duration The duration of the last low pulse in microseconds.
-   */
-  void set_last_low_duration(uint32_t duration) { lastLowDuration = duration; }
-
-  /**
-   * @brief Gets the timestamp of the last high start.
-   *
-   * @return The timestamp of the last high start in microseconds.
-   */
-  uint32_t get_last_high_start() const { return lastHighStart; }
-
-  /**
-   * @brief Sets the timestamp of the last high start.
-   *
-   * @param timestamp The timestamp of the last high start in microseconds.
-   */
-  void set_last_high_start(uint32_t timestamp) { lastHighStart = timestamp; }
-
-  /**
-   * @brief Gets the timestamp of the last low start.
-   *
-   * @return The timestamp of the last low start in microseconds.
-   */
-  uint32_t get_last_low_start() const { return lastLowStart; }
-
-  /**
-   * @brief Sets the timestamp of the last low start.
-   *
-   * @param timestamp The timestamp of the last low start in microseconds.
-   */
-  void set_last_low_start(uint32_t timestamp) { lastLowStart = timestamp; }
-
+  static bool is_short_bit(const rmt_item32_t *item) {
+    return matches_duration(get_high_duration(item), bit_short_high_duration_ms * 1000) &&
+           matches_duration(get_low_duration(item), bit_low_duration_ms * 1000);
+  }
   /**
    * @brief Checks if a frame has started.
    *
@@ -302,53 +231,43 @@ class DecodingStateFrame : public BaseFrame {
    * @param value The started state of a frame.
    */
   void set_started(bool value) { started = value; }
+  void debug(const char *msg = "") {
+#ifdef USE_LOGGER
+    auto *log = logger::global_logger;
+    bool debug_status = (log != nullptr && log->level_for(TAG_DECODING) >= ESPHOME_LOG_LEVEL_DEBUG);
+#else
+    bool debug_status = false;
+#endif
 
- private:
-  uint8_t frameIndex;         ///< Index of the current frame.
-  uint8_t currentByte;           ///< The current byte being processed.
-  uint8_t bit_current_index;     ///< The current bit index in the byte.
-  uint32_t lastHighStart;     ///< Timestamp of the last high start.
-  uint32_t lastLowStart;      ///< Timestamp of the last low start.
-  uint32_t lastHighDuration;  ///< Duration of the last high pulse.
-  uint32_t lastLowDuration;   ///< Duration of the last low pulse.
-  bool started;               ///< Indicates if a frame has started.
-  bool finalized;             ///< Indicates if the frame has been finalized.
+    if (this->data_len_ == 0 || strlen(msg) == 0)
+      return;
 
-  /**
-   * @brief Checks if the last high duration matches the target duration.
-   *
-   * @param target_duration_ms The target duration in milliseconds.
-   * @return true If the last high duration matches the target duration.
-   * @return false Otherwise.
-   */
-  inline bool last_high_duration_matches(uint32_t target_duration_ms) const {
-    auto target_duration_us = target_duration_ms * 1000;
-    return lastHighDuration >= (target_duration_us - pulse_duration_threshold_us) &&
-           lastHighDuration <= (target_duration_us + pulse_duration_threshold_us);
-  }
+    BaseFrame inv_bf = BaseFrame(*this);
+    inv_bf.inverseLevels();
 
-  /**
-   * @brief Checks if the last low duration matches the target duration.
-   *
-   * @param target_duration_ms The target duration in milliseconds.
-   * @return true If the last low duration matches the target duration.
-   * @return false Otherwise.
-   */
-  inline bool last_low_duration_matches(uint32_t target_duration_ms) const {
-    auto target_duration_us = target_duration_ms * 1000;
-    return lastLowDuration >= (target_duration_us - pulse_duration_threshold_us) &&
-           lastLowDuration <= (target_duration_us + pulse_duration_threshold_us);
-  }
-
-  /**
-   * @brief Inverts the levels of the frame buffer.
-   */
-  void inverseLevels() {
-    for (int i = 0; i < frameIndex; i++) {
-      buffer[i] = ~buffer[i];
+    ESP_LOGV(TAG_DECODING,
+             "%s%s packet. data_len: %d, currentByte: %d, bit_current_index: %d, "
+             "started: %s, finalized: %s, passes: %d, checksum: %d?=%d, inv checksum: %d?=%d",
+             msg, this->source_string(), this->data_len_, currentByte, bit_current_index,
+             started ? "STARTED" : "NOT STARTED", finalized ? "FINALIZED" : "NOT FINALIZED", passes_count,
+             this->get_checksum_byte(), calculateChecksum(), inv_bf.get_checksum_byte(), inv_bf.calculateChecksum());
+    if (debug_status && (is_size_valid())) {
+      debug_print_hex();
+      inv_bf.debug_print_hex();
     }
   }
+
+  inline bool is_complete() const { return this->started && (this->is_size_valid()) && is_checksum_valid(); }
+  uint32_t passes_count;
+  void is_changed(const BaseFrame &frame);
+
+ protected:
+ private:
+  uint8_t currentByte;        ///< The current byte being processed.
+  uint8_t bit_current_index;  ///< The current bit index in the byte.
+  bool started;               ///< Indicates if a frame has started.
+  bool finalized;             ///< Indicates if the frame has been finalized.
 };
 
 }  // namespace hayward_pool_heater
-}
+}  // namespace esphome
