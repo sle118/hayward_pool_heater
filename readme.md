@@ -3,7 +3,7 @@
 This project is a continuation and enhancement of the original work by [njanik](https://github.com/njanik/hayward-pool-heater-mqtt), which focused on interfacing with Hayward pool heaters using MQTT. This new project aims to integrate the Hayward pool heater communication into the ESPHome ecosystem, enabling seamless integration with Home Assistant and providing more control and monitoring capabilities.
 
 ## CURRENT PROJECT STATE -- READ FIRST !
-**The code has not yet been tested on a real heat pump controller. I'll update the README when I feel like it works the way I intended. For now, feel free to browse the code but don't upload it unless you feel like you can troubleshoot things on your own.**
+**This code is running on my own heat pump in passive mode. That is, it is now capturing packets, which helps me investigate the protocol. I still don't feel confident that we should be sending commands with it, mainly because I still have an uncertainty as to where the setpoint temperature lives. There actually seem to be two of them, one for heating the water and one for cooling it when it becomes too warm and when the pool heat pump is configured in auto mode with dual set points. It is safe to use if you want to help analyze the protocol and contribute to this effort, but you should probably not try to command the heat pump at this point.**
 
 ** !!! you have been warned !! **
 
