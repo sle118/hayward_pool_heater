@@ -57,21 +57,23 @@ class DecodingStateFrame : public BaseFrame {
   /**
    * @brief Constructs a new DecodingStateFrame object.
    */
+
   DecodingStateFrame()
-      : BaseFrame(), currentByte(0), bit_current_index(0), started(false), finalized(false), passes_count(0) {}
+      : BaseFrame(), passes_count(0), currentByte(0), bit_current_index(0), started(false), finalized(false) {}
 
   /**
    * @brief Copy constructor for DecodingStateFrame.
    *
    * @param other The DecodingStateFrame object to copy from.
    */
+
   DecodingStateFrame(const DecodingStateFrame &other)
       : BaseFrame(other),
+        passes_count(0),
         currentByte(other.currentByte),
         bit_current_index(other.bit_current_index),
         started(other.started),
-        finalized(other.finalized),
-        passes_count(0) {}
+        finalized(other.finalized) {}
 
   /**
    * @brief Copy assignment operator for DecodingStateFrame.

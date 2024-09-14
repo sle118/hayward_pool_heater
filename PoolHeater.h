@@ -100,7 +100,7 @@ extern const char *POOL_HEATER_TAG;
  */
 class PoolHeater : public climate::Climate, public Component {
  public:
-  PoolHeater(InternalGPIOPin *gpio_pin, uint8_t max_buffer_count);
+  PoolHeater(InternalGPIOPin *gpio_pin);
 
   void set_out_temperature_sensor(sensor::Sensor *sensor);
   void set_actual_status_sensor(text_sensor::TextSensor *sensor);

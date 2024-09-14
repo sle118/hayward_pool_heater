@@ -78,7 +78,7 @@ CONF_ENHANCED_MHK_SUPPORT = (
 )
 
 CONF_GPIO_NETPIN = "pin_txrx"
-CONF_MAX_BUFFER_COUNT = "max_buffer_count"
+# CONF_MAX_BUFFER_COUNT = "max_buffer_count"
 CONF_OUT_TEMPERATURE = "out_temperature"
 CONF_TEMPERATURE_SUCTION = "suction_temperature_T01"
 CONF_TEMPERATURE_COIL = "coil_temperature_T04"
@@ -298,7 +298,7 @@ SENSORS_SCHEMA = cv.All(
 CONFIG_SCHEMA = BASE_SCHEMA.extend(
     {
         cv.Optional(CONF_SENSORS, default={}): SENSORS_SCHEMA,
-        cv.Optional(CONF_MAX_BUFFER_COUNT, default=8): cv.int_range(min=1, max=10),
+        # cv.Optional(CONF_MAX_BUFFER_COUNT, default=8): cv.int_range(min=1, max=10),
     }
 )
 
@@ -307,9 +307,9 @@ CONFIG_SCHEMA = BASE_SCHEMA.extend(
 async def to_code(config):
 
     pin_component = await cg.gpio_pin_expression(config[CONF_GPIO_NETPIN])
-    max_buffer_count = config[CONF_MAX_BUFFER_COUNT]
+    # max_buffer_count = config[CONF_MAX_BUFFER_COUNT]
     heater_component = cg.new_Pvariable(
-        config[CONF_ID], pin_component, max_buffer_count
+        config[CONF_ID], pin_component
     )
 
     await cg.register_component(heater_component, config)

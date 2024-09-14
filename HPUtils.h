@@ -33,3 +33,16 @@ static inline void set_bit(uint8_t* byte, uint8_t position) {
 static inline bool get_bit(uint8_t byte, uint8_t position) { return byte & (1 << position); }
 }  // namespace hayward_pool_heater
 }  // namespace esphome
+
+
+// #ifdef USE_ESP32
+// #include <freertos/FreeRTOS.h>
+// #include <freertos/task.h>
+
+#ifdef USE_ARDUINO
+#include <esp32-hal.h>
+
+#else
+#include "esp_timer.h"
+static inline uint32_t millis() { return (uint32_t) (esp_timer_get_time() / 1000); }
+#endif

@@ -44,8 +44,8 @@
 #include <esp32-hal.h>
 #endif
 #else
-#error
-("Not using ESP32")
+#define millis  (uint32_t) (esp_timer_get_time() / 1000)
+
 #endif
 namespace esphome {
 namespace hayward_pool_heater {
@@ -61,10 +61,14 @@ const char *TAG_BUS = "hayward_pool_heater.bus";
 const char *TAG = "hayward_pool_heater.driver";
 const char *TAG_PACKET = "pk";
 
-    HPBusDriver::HPBusDriver(size_t maxWriteLength, size_t transmitCount)
+HPBusDriver::HPBusDriver(size_t maxWriteLength, size_t transmitCount)
     : mode(BUSMODE_RX),
-           TxTaskHandle(nullptr), RxTaskHandle(nullptr), maxBufferCount(maxBufferCount), maxWriteLength(maxWriteLength),
-           transmit_count(transmitCount), tx_packets_queue(maxWriteLength) {}
+      TxTaskHandle(nullptr),
+      RxTaskHandle(nullptr),
+      transmit_count(transmitCount),
+      // maxBufferCount(maxBufferCount),
+      maxWriteLength(maxWriteLength),
+      tx_packets_queue(maxWriteLength) {}
 
 void HPBusDriver::setup() {
   this->current_frame.reset("From setup");
@@ -199,7 +203,7 @@ bool HPBusDriver::has_time_to_send() {
   static unsigned long last_send_time = 0;  // Tracks the last time a message was sent
 
   unsigned long current_time = millis();
-  auto end_of_transmit = current_time + this->transmit_count * single_frame_max_duration_ms;
+  uint32_t end_of_transmit = current_time + this->transmit_count * single_frame_max_duration_ms;
 
   if (this->has_controller() && this->is_controller_timeout()) {
     return true;  // assume controller was disconnected

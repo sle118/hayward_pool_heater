@@ -45,9 +45,8 @@ namespace esphome {
 namespace hayward_pool_heater {
 
 const char *POOL_HEATER_TAG = "hayward_pool_heater";
-PoolHeater::PoolHeater(InternalGPIOPin *gpio_pin, uint8_t max_buffer_count) {
+PoolHeater::PoolHeater(InternalGPIOPin *gpio_pin) {
   this->driver_.set_gpio_pin(gpio_pin);
-  this->driver_.set_max_buffer_count(max_buffer_count);
 }
 
 void PoolHeater::setup() {
@@ -119,7 +118,7 @@ void PoolHeater::control(const climate::ClimateCall &call) {
   if (call.get_target_temperature().has_value()) {
     if (!is_temperature_valid(*call.get_target_temperature())) {
       char error_msg[101] = {};
-      sprintf(error_msg, "Invalid temperature %.1d. Must be between 15C and 33C.", *call.get_target_temperature());
+      sprintf(error_msg, "Invalid temperature %.1f. Must be between 15C and 33C.", call.get_target_temperature().value());
       ESP_LOGE(POOL_HEATER_TAG, "Error setTemp:  %s", error_msg);
       set_actual_status(error_msg);
       return;
@@ -217,12 +216,15 @@ void PoolHeater::parse_heater_packet(const DecodingStateFrame &frame) {
         // Determine the current action based on the heater state
         if (!frame.packet.tempprog.mode.power) {
           ESP_LOGV(POOL_HEATER_TAG, "Power: OFF");
-          action = climate::CLIMATE_ACTION_IDLE;
+          action = climate::CLIMATE_ACTION_OFF;
         } else {
           // The heater is on, determine if it's heating or cooling
           action = frame.packet.tempprog.mode.heat ? climate::CLIMATE_ACTION_HEATING : climate::CLIMATE_ACTION_COOLING;
         }
 
+        // logic table:
+        // h02 mode: 
+        // 2 - Heating only : 
         // Set the mode based on the heater's reported mode
         if (frame.packet.tempprog.mode.auto_mode) {
           ESP_LOGV(POOL_HEATER_TAG, "Mode: AUTO");

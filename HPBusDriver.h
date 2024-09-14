@@ -84,9 +84,9 @@ class HPBusDriver {
    */
   HPBusDriver(size_t maxWriteLength = 8, size_t transmitCount = default_frame_transmit_count);
   void set_gpio_pin(InternalGPIOPin* gpio_pin) { this->gpio_pin_ = gpio_pin; }
-  void set_max_buffer_count(uint8_t max_buffer_count) { this->maxBufferCount = max_buffer_count; }
+  // void set_max_buffer_count(uint8_t max_buffer_count) { this->maxBufferCount = max_buffer_count; }
 
-  uint8_t get_max_buffer_count() { return this->maxBufferCount; }
+  // uint8_t get_max_buffer_count() { return this->maxBufferCount; }
   InternalGPIOPin* get_gpio_pin() { return this->gpio_pin_; }
 
   /**
@@ -148,7 +148,7 @@ class HPBusDriver {
   TaskHandle_t RxTaskHandle;           ///< Handle to the I/O task.
   DecodingStateFrame current_frame;    ///< The current frame being processed.
   size_t transmit_count;               ///< The number of times to repeat transmission.
-  uint8_t maxBufferCount;              ///< Maximum buffer count for the received frames.
+  // uint8_t maxBufferCount;              ///< Maximum buffer count for the received frames.
   size_t maxWriteLength;               ///< Maximum write length for the transmitted frames.
   SpinLockQueue<DecodingStateFrame> received_frames;  ///< Queue for received frames.
   SpinLockQueue<CommandFrame> tx_packets_queue;       ///< Queue for frames to be transmitted.

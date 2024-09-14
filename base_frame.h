@@ -31,7 +31,7 @@
  *
  * @disclaimer Use at your own risk. The developer assumes no responsibility
  * for any damage or loss caused by the use of this software.
- */ 
+ */
 
 #pragma once
 #include <stdint.h>
@@ -45,8 +45,8 @@
 #include "esphome/core/log.h"
 #include "esphome/components/logger/logger.h"
 #include <driver/rmt.h>
-
-extern char* esp_log_system_timestamp(void);
+#include "HPUtils.h"
+extern char *esp_log_system_timestamp(void);
 namespace esphome {
 namespace hayward_pool_heater {
 
@@ -556,7 +556,7 @@ class BaseFrame {
     // Create a buffer for the frame data with the difference indication
     char output_buffer[5 * sizeof(frame.packet.data) + 20];  // Size calculation
     // int offset = snprintf(output_buffer, sizeof(output_buffer), "[%2zu] ", frame.data_len_);
-    int offset = 0; 
+    int offset = 0;
     for (size_t i = 0; i < sizeof(frame.packet.data); ++i) {
       if (i < frame.data_len_) {
         if (i == frame.data_len_ - 1 || frame.packet.data[i] == reference.packet.data[i]) {
@@ -601,8 +601,8 @@ class BaseFrame {
     char output_buffer[5 * sizeof(frame.packet.data) + 20];  // Size calculation
     // int offset = snprintf(output_buffer, sizeof(output_buffer), "[%2zu] ", frame.data_len_);
     int offset = 0;
-        // Format the frame data into the buffer
-        for (size_t i = 0; i < sizeof(frame.packet.data); ++i) {
+    // Format the frame data into the buffer
+    for (size_t i = 0; i < sizeof(frame.packet.data); ++i) {
       if (i < frame.data_len_) {
         offset += snprintf(output_buffer + offset, sizeof(output_buffer) - offset, "%02X", frame.packet.data[i]);
         // if (i < frame.data_len_ - 1) {
@@ -644,6 +644,11 @@ class BaseFrame {
     return bits_representation.to_string();
   }
 
+  static std::string format_bits_details(uint8_t byte) {
+    std::bitset<8> bits(byte);
+    return bits.to_string();
+  }
+
   template<typename T> static std::string format_bits_details_diff(const T &current, const T &reference) {
     // Calculate the number of bits in the type T
     constexpr size_t num_bits = sizeof(T) * 8;
@@ -655,22 +660,17 @@ class BaseFrame {
     // Create a string to hold the result
     std::string result;
 
-    // Compare bit by bit
-    for (size_t i = 0; i < num_bits; ++i) {
-      if (current_bits[i] == reference_bits[i]) {
+    // Compare bit by bit from MSB to LSB
+    for (size_t i = num_bits; i > 0; --i) {
+      if (current_bits[i - 1] == reference_bits[i - 1]) {
         result += 'x';  // unchanged bit
       } else {
-        result += current_bits[i] ? '1' : '0';  // changed bit
+        result += current_bits[i - 1] ? '1' : '0';  // changed bit
       }
     }
 
     // Return the diff string
     return result;
-  }
-
-  static std::string format_bits_details(uint8_t byte) {
-    std::bitset<8> bits(byte);
-    return bits.to_string();
   }
 
   frame_source_t get_source() const { return this->source_; }
@@ -696,11 +696,10 @@ class BaseFrame {
   }
   static std::string format_temperature_data(const temperature_t &temperature) {
     std::ostringstream oss;
-    oss << "T: ";
     oss << std::fixed << std::setprecision(1) << std::setw(2) << parse_temperature(temperature);
-    oss << "(" << (temperature.unknown_2 ? '1' : '0');
-    oss << (temperature.unknown_1 ? '1' : '0') << ")";    
-    oss << "ºC(0x" << std::setw(2) << std::setfill('0') << std::hex << static_cast<int>(temperature.raw) << ")";
+    oss << "ºC(" << (temperature.unknown_2 ? '1' : '0');
+    oss << (temperature.unknown_1 ? '1' : '0') << ")";
+    oss << "(0x" << std::setw(2) << std::setfill('0') << std::hex << static_cast<int>(temperature.raw) << ")";
 
     // oss << " ["  ; //<< static_cast<int>(temperature.integer)
     //<< ", " << static_cast<int>(temperature.decimal);
@@ -713,19 +712,17 @@ class BaseFrame {
     std::ostringstream oss;
     // Compare and format the temperature value
     if (parse_temperature(current) != parse_temperature(reference)) {
-      oss << std::fixed << std::setprecision(1) << parse_temperature(current);
+      oss << std::fixed << std::setprecision(1) << std::setw(2) << parse_temperature(current);
     } else {
       oss << "xx.x";  // No change
     }
-    oss << "ºC";
-
-    oss << "(" << (current.unknown_2 != reference.unknown_2 ? (current.unknown_2 ? '1' : '0') : 'x');
+    oss << "ºC(" << (current.unknown_2 != reference.unknown_2 ? (current.unknown_2 ? '1' : '0') : 'x');
     oss << (current.unknown_1 != reference.unknown_1 ? (current.unknown_1 ? '1' : '0') : 'x') << ")";
     if (current.raw != reference.raw) {
       oss << "(0x" << std::setw(2) << std::setfill('0') << std::hex << static_cast<int>(current.raw) << ")";
     } else {
       oss << "(xxxx)";
-    }    
+    }
     // oss << ")], ";
 
     // Format the full bit details with comparison
@@ -833,7 +830,8 @@ class BaseFrame {
     oss << frame.type_string() << "(" << frame.source_string() << "): ";
 
     // Format bits for each byte from index 1 to data_len_ - 1
-    for (size_t i = 1; i < frame.data_len_; ++i) {
+    // so we skip the frame type byte and the checksum
+    for (size_t i = 1; i < frame.data_len_-1; ++i) {
       oss << format_bits_details(frame.packet.data[i]) << " ";
     }
 
@@ -844,12 +842,12 @@ class BaseFrame {
     std::ostringstream oss;
     oss << type_string() << "(" << source_string() << "): ";
 
-    // Compare bits for each byte from index 1 to data_len_ - 1 and format differences
-    for (size_t i = 1; i < this->data_len_; ++i) {
-      if (this->packet.data[i] == reference.packet.data[i]) {
-        oss << "xxxxxxxx ";  // No change in this byte
-      } else {
-        oss << format_bits_details(this->packet.data[i]) << " ";
+    // Compare bits for each byte from index 1 to data_len_, not including the
+    // header and checksum
+    for (size_t i = 1; i < this->data_len_-1; ++i) {
+      oss<< format_bits_details_diff(this->packet.data[i],reference.packet.data[i]) ;
+      if(i<this->data_len_-1) {
+        oss << " ";
       }
     }
 
