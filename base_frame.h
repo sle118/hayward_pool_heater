@@ -35,17 +35,18 @@
 
 #pragma once
 #include <stdint.h>
-#include <bitset>
-#include <cstring>  // for std::memcpy
+// #include <cstring>  // for std::memcpy
 #include <string>
 #include <sstream>
 #include <iomanip>
-#include <algorithm>  // for std::copy
-
+// #include <algorithm>  // for std::copy
+#include <bitset>
+#include "stddef.h"
 #include "esphome/core/log.h"
 #include "esphome/components/logger/logger.h"
 #include <driver/rmt.h>
 #include "HPUtils.h"
+
 extern char *esp_log_system_timestamp(void);
 namespace esphome {
 namespace hayward_pool_heater {
@@ -255,6 +256,8 @@ typedef struct {
 // represents the minute within the hour (2C is 44 in decimal). 00,00: These might be padding bytes or reserved for
 // future use. FD: This byte is the checksum, calculated from the other bytes in the packet.
 
+// data content of clock frames. Calendar days may not be relevant as on many units, it is not possible
+// to adjust date/time.
 typedef struct {
   uint8_t reserved1;  // Reserved or ID byte (00)
   uint8_t reserved2;  // Reserved or ID byte (00)
@@ -266,6 +269,9 @@ typedef struct {
   uint8_t reserved3;
   uint8_t reserved4;
 } __attribute__((packed)) clock_time_t;
+
+// data content of short frames, i.e. frames with 9 bytes
+// for which analysis is not yet complete
 typedef struct {
   bits_details_t reserved_1;
   bits_details_t reserved_2;
@@ -277,6 +283,8 @@ typedef struct {
 } __attribute__((packed)) short_packet_t;
 ;
 
+// Main packet data structure (12 bytes)
+// consisting of all known packet data types
 typedef struct {
   union {
     uint8_t data[frame_data_length];  // Raw data array
@@ -303,28 +311,69 @@ typedef struct {
     };
   };
 } __attribute__((packed)) hp_packetdata_t;
-// #pragma pack(pop)
-static_assert(sizeof(hp_packetdata_t) == 12);
+
+// Verify packet data size in order to prevent misalignment of struct
+static_assert(sizeof(hp_packetdata_t) == 12, "Invalid packet data size");
+
 class BaseFrame {
  public:
+  /**
+   * @brief Constructs a new BaseFrame object.
+   *
+   * @details Initializes the BaseFrame object with the default values:
+   *   - source_ is set to SOURCE_UNKNOWN
+   *   - data_len_ is set to 0
+   *   - packet is cleared with memset
+   *   - frame_time_ms_ is set to the current millisecond value
+   */
   BaseFrame() : source_(SOURCE_UNKNOWN), data_len_(0) {
     std::memset(&packet, 0, sizeof(packet));
     this->frame_time_ms_ = millis();
     ESP_LOGVV(TAG_BF_FULL, "New BaseFrame instance created with frame time: %d ", this->frame_time_ms_);
   }
 
+  /**
+   * @brief Copy constructor for BaseFrame.
+   *
+   * @param other The BaseFrame object to copy from.
+   *
+   * This constructor creates a new BaseFrame object from a const reference to another BaseFrame object.
+   * The new object will have the same data as the original object, but will be a separate entity.
+   */
   BaseFrame(const BaseFrame &other)
       : packet(other.packet), source_(other.source_), data_len_(other.data_len_), frame_time_ms_(other.frame_time_ms_) {
     ESP_LOGVV(TAG_BF_FULL, "New BaseFrame from other const reference created with frame time: %d ",
               this->frame_time_ms_);
   }
 
+  /**
+   * @brief Compares two BaseFrame objects to check if they contain the same data.
+   *
+   * @param other The BaseFrame object to compare with.
+   * @return True if the two BaseFrame objects contain the same data, false otherwise.
+   *
+   * This operator compares the frame type, raw data bytes, source identifier, and data length of the two
+   * BaseFrame objects. If all of these values are equal, then the two objects are considered equal.
+   *
+   * frame time is ignored in the comparison in this context, as the comparator focuses on the data bytes 
+   * rather than the object itself.
+   */
   bool operator==(const BaseFrame &other) const {
     return (packet.frame_type == other.packet.frame_type &&
             std::memcmp(packet.data, other.packet.data, data_len_) == 0 && source_ == other.source_ &&
             data_len_ == other.data_len_);
   }
 
+  /**
+   * @brief Constructs a new BaseFrame from a static array of bytes.
+   *
+   * @param base_data The static array of bytes to construct the BaseFrame from.
+   *
+   * @details This constructor is used to create a BaseFrame from a static array of bytes.
+   * The size of the array is used to determine the size of the packet to be constructed.
+   * The array is copied into the packet data, and the frame time is set to the current
+   * millisecond value.
+   */
   template<size_t N> BaseFrame(const unsigned char (&base_data)[N]) {
     static_assert(N <= sizeof(this->packet.data), "Array size exceeds packet data size");
     std::memcpy(this->packet.data, base_data, N);
@@ -333,6 +382,12 @@ class BaseFrame {
     this->source_ = SOURCE_UNKNOWN;  // Assuming SOURCE_UNKNOWN is a valid identifier
     ESP_LOGVV(TAG_BF_FULL, "New BaseFrame from data buffer[N] created with frame time: %d ", this->frame_time_ms_);
   }
+
+/**
+ * @brief Copy assignment operator.
+ *
+ * @param other The BaseFrame to copy.
+ */ 
   BaseFrame &operator=(const BaseFrame &other) {
     if (this != &other || this->frame_time_ms_ != other.frame_time_ms_) {
       // the equality operator doesn't consider frame_time in its logic,
@@ -346,6 +401,12 @@ class BaseFrame {
               this->frame_time_ms_);
     return *this;
   }
+
+  /**
+   * @brief Copy constructor.
+   *
+   * @param other The BaseFrame to copy.
+   */
   template<size_t N> BaseFrame &operator=(const unsigned char (&base_data)[N]) {
     static_assert(N <= sizeof(this->packet.data), "Array size exceeds packet data size");
     std::memcpy(this->packet.data, base_data, N);
@@ -358,6 +419,17 @@ class BaseFrame {
   }
 
   frame_type_t get_frame_type() const { return get_frame_type(*this); }
+
+  /**
+   * @brief Get the frame type of a BaseFrame.
+   *
+   * @param[in] frame The BaseFrame to get the frame type from.
+   * @return The frame type as a frame_type_t enum.
+   *
+   * This function takes a BaseFrame and returns the frame type as a frame_type_t enum.
+   * It does this by switching on the frame type stored in the BaseFrame, and returning
+   * the appropriate enum value.
+   */
   static frame_type_t get_frame_type(const BaseFrame &frame) {
     switch (frame.packet.frame_type) {
       case FRAME_TYPE_TEMP_OUT:
@@ -387,19 +459,82 @@ class BaseFrame {
         return FRAME_TYPE_UNKNOWN;
     }
   }
+
+  /**
+   * @brief Checks if the frame is a short frame.
+   *
+   * @return true If the frame is a short frame.
+   * @return false Otherwise
+   */
   bool is_short_frame() const { return this->data_len_ == frame_data_length_short; }
+
+  /**
+   * @brief Checks if the frame is a long frame.
+   *
+   * @return true If the frame is a long frame.
+   * @return false Otherwise
+   */
   bool is_long_frame() const { return this->data_len_ == frame_data_length; }
+
+  /**
+   * @brief Returns the data length of the frame.
+   *
+   * Returns the data length of the frame, taking into account whether the frame is a short frame or not.
+   *
+   * @return The data length of the frame
+   */
   size_t get_data_len() const { return this->data_len_; }
+  /**
+   * @brief Returns the checksum byte of the frame.
+   *
+   * Returns the checksum byte of the frame, taking into account whether the frame is a short frame or not.
+   *
+   * @return The checksum byte of the frame
+   */
   uint8_t get_checksum_byte() const { return get_checksum_byte_val(*this); }
 
+  /**
+   * @brief Returns a reference to the checksum byte of the frame.
+   *
+   * Returns a reference to the checksum byte of the frame, taking into account whether the frame is a short frame or
+   * not.
+   *
+   * @param frame The frame to get the checksum from
+   * @return A reference to the checksum byte of the frame
+   */
   static uint8_t &get_checksum_byte_ref(BaseFrame &frame) {
     return (frame.is_short_frame()) ? frame.packet.short_frame.checksum : frame.packet.checksum;
   }
+
+  /**
+   * @brief Returns the checksum byte of the frame.
+   *
+   * Returns the checksum byte of the frame, taking into account whether the frame is a short frame or not.
+   *
+   * @param frame The frame to get the checksum from
+   * @return The checksum byte of the frame
+   */
   static uint8_t get_checksum_byte_val(const BaseFrame &frame) {
     return (frame.is_short_frame()) ? frame.packet.short_frame.checksum : frame.packet.checksum;
   }
+  
 
-  void set_checksum() { get_checksum_byte_ref(*this) = calculateChecksum(this->packet.data, this->data_len_); }
+  
+  /**
+   * @brief Calculates and sets the checksum for the current frame.
+   *
+   * Calculates the checksum of the current frame and sets it in the packet.
+   */
+  void set_checksum() { 
+    get_checksum_byte_ref(*this) = calculateChecksum(this->packet.data, this->data_len_); 
+    }
+  
+  /**
+   * @brief Debug print a buffer of bytes in hex format.
+   * @param buffer The buffer to print.
+   * @param length The length of the data in the buffer.
+   * @param source The source of the frame.
+   */
   template<size_t N>
   static void debug_print_hex(const uint8_t (&buffer)[N], const size_t length, const frame_source_t source) {
     std::string hexString;
@@ -411,7 +546,7 @@ class BaseFrame {
         hexString += ", ";
       }
     }
-    ESP_LOGV(TAG_BF_HEX, "%s(%d): %s", source_string(source), length, hexString.c_str());
+    ESP_LOGV(TAG_BF_HEX, "%s(%zu): %s", source_string(source), length, hexString.c_str());
   }
   void debug_print_hex() const { debug_print_hex(this->packet.data, this->data_len_, this->source_); }
 
@@ -427,8 +562,18 @@ class BaseFrame {
         return "UNK ";
     }
   }
+    /**
+   * @brief Returns a string representation of the frame source.
+   *
+   * @return A string representation of the frame source.
+   */ 
   const char *source_string() const { return source_string(this->source_); }
 
+  /**
+   * @brief Returns a string representation of the frame type.
+   *
+   * @return A string representation of the frame type.
+   */ 
   const char *type_string() const {
     switch (this->get_frame_type()) {
       case FRAME_TEMP_OUT:
@@ -477,7 +622,7 @@ class BaseFrame {
       ESP_LOGD(TAG_BF_FULL, "Before inverting bytes");
       debug_print_hex(buffer, length, SOURCE_UNKNOWN);
     }
-    for (int i = 0; i < length; i++) {
+    for (unsigned long i = 0; i < length; i++) {
       buffer[i] = ~buffer[i];
     }
     if (log_active(TAG_BF_FULL)) {
@@ -493,7 +638,7 @@ class BaseFrame {
 
     // Ensure length is within bounds
     if (length > N) {
-      ESP_LOGE(TAG_BF, "Length larger than buffer size (%d>%d)", length, N);
+      ESP_LOGE(TAG_BF, "Length larger than buffer size (%zu>%lu)", length, N);
       return 0;  // Return 0 or some error indicator
     }
 
@@ -620,7 +765,7 @@ class BaseFrame {
     // ESP_LOGD(TAG_BF, "%s [%s] %s", normalized_prefix.c_str(), output_buffer, get_format(frame).c_str());
   }
 
-  std::size_t size() const { return this->data_len_; }
+  size_t size() const { return this->data_len_; }
   bool is_size_valid() const {
     return (this->data_len_ == frame_data_length_short || this->data_len_ == frame_data_length);
   }
@@ -629,9 +774,9 @@ class BaseFrame {
 
   const uint8_t *data() const { return this->packet.data; }
 
-  uint8_t &operator[](std::size_t index) { return this->packet.data[index]; }
+  uint8_t &operator[](size_t index) { return this->packet.data[index]; }
 
-  const uint8_t &operator[](std::size_t index) const { return this->packet.data[index]; }
+  const uint8_t &operator[](size_t index) const { return this->packet.data[index]; }
 
   template<typename T> static std::string format_bits_details(const T &value) {
     // Calculate the number of bits in the type T
@@ -700,19 +845,14 @@ class BaseFrame {
     oss << "ºC(" << (temperature.unknown_2 ? '1' : '0');
     oss << (temperature.unknown_1 ? '1' : '0') << ")";
     oss << "(0x" << std::setw(2) << std::setfill('0') << std::hex << static_cast<int>(temperature.raw) << ")";
-
-    // oss << " ["  ; //<< static_cast<int>(temperature.integer)
-    //<< ", " << static_cast<int>(temperature.decimal);
-
-    // oss << ")]" ; //, " << format_bits_details(temperature.raw) << "]";
-
     return oss.str();
   }
   std::string format_temperature_data_diff(const temperature_t &current, const temperature_t &reference) const {
     std::ostringstream oss;
     // Compare and format the temperature value
     if (parse_temperature(current) != parse_temperature(reference)) {
-      oss << std::fixed << std::setprecision(1) << std::setw(2) << parse_temperature(current);
+      oss << std::fixed << std::setprecision(1) << std::setw(2);
+      oss << parse_temperature(current);
     } else {
       oss << "xx.x";  // No change
     }
@@ -723,15 +863,6 @@ class BaseFrame {
     } else {
       oss << "(xxxx)";
     }
-    // oss << ")], ";
-
-    // Format the full bit details with comparison
-    // if (current.raw != reference.raw) {
-    //     oss << format_bits_details(current);
-    // } else {
-    //     oss << "xxxxxxxx";  // No change in bits
-    // }
-
     return oss.str();
   }
   std::string get_format_diff(const BaseFrame &reference) const {
@@ -825,6 +956,7 @@ class BaseFrame {
     return oss.str();
   }
 
+  
   static std::string format_unknown_frame(const BaseFrame &frame) {
     std::ostringstream oss;
     oss << frame.type_string() << "(" << frame.source_string() << "): ";

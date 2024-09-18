@@ -233,7 +233,7 @@ class PoolHeater : public climate::Climate, public Component {
    * @brief Parse a heater packet.
    * @param frame The frame to parse.
    */
-  void parse_heater_packet(const DecodingStateFrame &frame);
+  void parse_heater_packet(const Decoder &frame);
   ESPPreferenceObject preferences_;
   struct PoolHeaterPreferences {
     bool dummy;

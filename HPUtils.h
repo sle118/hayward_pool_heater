@@ -1,5 +1,6 @@
 #pragma once
-#include "esphome/core/hal.h"
+// #include "esphome/core/hal.h"
+#include <cstdint>
 namespace esphome {
 namespace hayward_pool_heater {
 

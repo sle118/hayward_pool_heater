@@ -36,8 +36,9 @@
 #pragma once
 
 #include "base_frame.h"
-#include "esphome/components/climate/climate.h"
-#include "esphome/core/application.h"
+#include "esphome/components/climate/climate_mode.h"
+// #include "esphome/components/climate/climate.h"
+// #include "esphome/core/application.h"
 namespace esphome {
 namespace hayward_pool_heater {
 

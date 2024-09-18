@@ -35,13 +35,13 @@
 
 #pragma once
 
-#include <atomic>
+// #include <atomic>
 #include <cstring>  // for std::memcpy
-#include <deque>
+// #include <deque>
 #include <vector>
-#include <iomanip>
+// #include <iomanip>
 #include <sstream>
-
+#include <map>
 
 #include "esphome/components/logger/logger.h"
 
@@ -50,6 +50,7 @@
 #include "SpinLockQueue.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/hal.h"
 
 namespace esphome {
 namespace hayward_pool_heater {
@@ -83,11 +84,11 @@ class HPBusDriver {
    * @param transmitCount The number of times to repeat transmission.
    */
   HPBusDriver(size_t maxWriteLength = 8, size_t transmitCount = default_frame_transmit_count);
-  void set_gpio_pin(InternalGPIOPin* gpio_pin) { this->gpio_pin_ = gpio_pin; }
+  void set_gpio_pin(InternalGPIOPin *gpio_pin) { this->gpio_pin_ = gpio_pin; }
   // void set_max_buffer_count(uint8_t max_buffer_count) { this->maxBufferCount = max_buffer_count; }
 
   // uint8_t get_max_buffer_count() { return this->maxBufferCount; }
-  InternalGPIOPin* get_gpio_pin() { return this->gpio_pin_; }
+  InternalGPIOPin *get_gpio_pin() { return this->gpio_pin_; }
 
   /**
    * @brief Initializes the bit-banging interface.
@@ -111,64 +112,80 @@ class HPBusDriver {
    * @return true If a frame was successfully retrieved.
    * @return false If the queue is empty.
    */
-  bool get_next_frame(DecodingStateFrame* frame);
-  bool is_controller_timeout(){
+  bool get_next_frame(Decoder *frame);
+
+  /**
+   * @brief Checks if the time since the last controller packet exceeds the allowed delay.
+   *
+   * @return true If the time since the last controller packet exceeds the allowed delay.
+   * @return false If the time since the last controller packet is within the allowed delay or
+   * if no controller packet has been received yet.
+   */
+  bool is_controller_timeout() {
     return this->previous_controller_packet_time_.has_value() &&
-          this->previous_controller_packet_time_.value()+(delay_between_controller_messages_ms*1.5)<millis();
+           this->previous_controller_packet_time_.value() + (delay_between_controller_messages_ms * 1.5) < millis();
   }
+
+
+  /**
+   * @brief Checks if a controller is connected.
+   *
+   * @return true If a controller is connected.
+   * @return false If no controller is connected.
+   *
+   * The presence of a controller is determined by checking if the time since the last
+   * controller packet exceeds the allowed delay. If it does, we consider that the
+   * controller is disconnected.
+   */
   bool has_controller() {
     // we need to consider that we have a controller up until enough time has passed,
     // which could indicate that it has been disconnected
-    return (this->controler_packets_received_.has_value() &&
-            this->controler_packets_received_.value() ) ;
+    return (this->controler_packets_received_.has_value() && this->controler_packets_received_.value());
   }
-  optional<uint32_t> next_controller_packet(){
-    if(this->previous_controller_packet_time_.has_value()){
-      return this->previous_controller_packet_time_.value()+ delay_between_controller_messages_ms;
+  optional<uint32_t> next_controller_packet() {
+    if (this->previous_controller_packet_time_.has_value()) {
+      return this->previous_controller_packet_time_.value() + delay_between_controller_messages_ms;
     }
-    if(millis()<delay_between_controller_messages_ms){
+    if (millis() < delay_between_controller_messages_ms) {
       return delay_between_controller_messages_ms;
     }
     return {};
   }
-  bool is_time_for_next(){
+  bool is_time_for_next() {
     return !this->previous_sent_packet_.has_value() ||
-          this->previous_sent_packet_.value()+delay_between_sending_messages_ms<=millis();
+           this->previous_sent_packet_.value() + delay_between_sending_messages_ms <= millis();
   }
   bus_mode_t get_bus_mode() { return this->mode; }
-    
 
  protected:
   optional<bool> controler_packets_received_;
   optional<uint32_t> previous_controller_packet_time_;
   optional<uint32_t> previous_sent_packet_;
   volatile bus_mode_t mode;  ///< The current mode of the bus (transmit or receive).
-  InternalGPIOPin* gpio_pin_{nullptr};
-  TaskHandle_t TxTaskHandle;           ///< Handle to the I/O task.
-  TaskHandle_t RxTaskHandle;           ///< Handle to the I/O task.
-  DecodingStateFrame current_frame;    ///< The current frame being processed.
-  size_t transmit_count;               ///< The number of times to repeat transmission.
+  InternalGPIOPin *gpio_pin_{nullptr};
+  TaskHandle_t TxTaskHandle;         ///< Handle to the I/O task.
+  TaskHandle_t RxTaskHandle;         ///< Handle to the I/O task.
+  Decoder current_frame;  ///< The current frame being processed.
+  size_t transmit_count;             ///< The number of times to repeat transmission.
   // uint8_t maxBufferCount;              ///< Maximum buffer count for the received frames.
-  size_t maxWriteLength;               ///< Maximum write length for the transmitted frames.
-  SpinLockQueue<DecodingStateFrame> received_frames;  ///< Queue for received frames.
+  size_t maxWriteLength;                              ///< Maximum write length for the transmitted frames.
+  SpinLockQueue<Decoder> received_frames;  ///< Queue for received frames.
   SpinLockQueue<CommandFrame> tx_packets_queue;       ///< Queue for frames to be transmitted.
   rmt_config_t rmt_tx_config_;
   rmt_config_t rmt_rx_config_;
   RingbufHandle_t rb_;
-    std::vector<std::string> pulse_strings_;  // Vector to store formatted pulse strings
+  std::vector<std::string> pulse_strings_;  // Vector to store formatted pulse strings
   uint64_t last_change_us_;
   volatile rmt_item32_t current_pulse_;
   std::map<uint8_t, BaseFrame> packet_map_;
 
-
-
-inline uint64_t elapsed(uint64_t now){
-  if (now >= this->last_change_us_) {
-    return now - this->last_change_us_;
-  } else {
+  inline uint64_t elapsed(uint64_t now) {
+    if (now >= this->last_change_us_) {
+      return now - this->last_change_us_;
+    } else {
       return UINT64_MAX - this->last_change_us_ + now + 1;
+    }
   }
-}
 
  private:
   void start_receive();
@@ -180,7 +197,7 @@ inline uint64_t elapsed(uint64_t now){
    * spacing between frames and groups. It also manages the transmission count.
    */
   void process_send_queue();
-  static void isr_handler(HPBusDriver* instance);
+  static void isr_handler(HPBusDriver *instance);
 
   void isr_handler();
   /**
@@ -193,8 +210,8 @@ inline uint64_t elapsed(uint64_t now){
    *
    * @param arg A pointer to the HPBusDriver instance.
    */
-  static void TxTask(void* arg);
-  static void RxTask(void* arg);
+  static void TxTask(void *arg);
+  static void RxTask(void *arg);
 
   /**
    * @brief Checks if there is enough time to send all packets before the next controller packet.
@@ -207,8 +224,6 @@ inline uint64_t elapsed(uint64_t now){
    * @return false Otherwise.
    */
   bool has_time_to_send();
-
-
 
   /**
    * @brief Sends the start of frame header on the bus.
@@ -242,7 +257,8 @@ inline uint64_t elapsed(uint64_t now){
    * @param ms The duration in milliseconds.
    */
   void _sendHigh(uint32_t ms) {
-    if (this->gpio_pin_ == nullptr) return;
+    if (this->gpio_pin_ == nullptr)
+      return;
     this->gpio_pin_->digital_write(true);
     delayMicroseconds(ms * 1000);
   }
@@ -253,109 +269,100 @@ inline uint64_t elapsed(uint64_t now){
    * @param ms The duration in milliseconds.
    */
   void _sendLow(uint32_t ms) {
-    if (this->gpio_pin_ == nullptr) return;
+    if (this->gpio_pin_ == nullptr)
+      return;
     this->gpio_pin_->digital_write(false);
     delayMicroseconds(ms * 1000);
   }
 
-  void process_pulse(rmt_item32_t* item);
+  void process_pulse(rmt_item32_t *item);
   void finalize_frame(bool timeout);
 
-  
-  std::string format_pulse_item(const rmt_item32_t* item) {
+  std::string format_pulse_item(const rmt_item32_t *item) {
     if (item == nullptr) {
       return "";
     }
     std::ostringstream oss;
-    uint32_t high_ticks = item->level0 ?  : item->duration1;
-    uint32_t low_ticks = item->level0 ? item->duration1 : item->duration0;
-
-    // if(DecodingStateFrame::is_start_frame(item)){
-    //   oss << "\r\n";
-    // }
-    
-    if(DecodingStateFrame::is_short_bit(item) ||
-      DecodingStateFrame::is_long_bit(item)){
-          oss << "b";
-        }
-        else {
-          oss << (item->level0 ? "H" : "L") << item->duration0 << ":" << (item->level1 ? "H" : "L")<< item->duration1 << " ";
-        }
+    if (Decoder::is_short_bit(item) || Decoder::is_long_bit(item)) {
+      oss << "b";
+    } else {
+      oss << (item->level0 ? "H" : "L") << item->duration0 << ":" << (item->level1 ? "H" : "L") << item->duration1
+          << " ";
+    }
     // Store the result in the vector
     return oss.str();
   }
-  void log_pulse_item(const rmt_item32_t* item) {
+  void log_pulse_item(const rmt_item32_t *item) {
     if (item == nullptr) {
       return;
     }
 
-    auto* log = logger::global_logger;
+    auto *log = logger::global_logger;
     if (log == nullptr || log->level_for(TAG_PULSES) < ESPHOME_LOG_LEVEL_VERBOSE) {
       return;
     }
 
     // Store the result in the vector
-    pulse_strings_.push_back(format_pulse_item(item ));
+    pulse_strings_.push_back(format_pulse_item(item));
   }
 
-void log_pulses()  {
+  void log_pulses() {
     if (pulse_strings_.empty()) {
-        return;
+      return;
     }
 
-    auto* log = logger::global_logger;
+    auto *log = logger::global_logger;
     if (log == nullptr || log->level_for(TAG_PULSES) < ESPHOME_LOG_LEVEL_VERBOSE) {
-        return;
+      return;
     }
 
     std::string log_chunk = "PULSES:";
-    uint8_t b_count=0;
-    uint8_t B_count=0;
-    uint8_t F_count=0;
+    uint8_t b_count = 0;
+    uint8_t B_count = 0;
+    uint8_t F_count = 0;
     std::string processed_str;
     const size_t max_chunk_length = 125;
 
-    
-    for (const auto& str : pulse_strings_) {
-        processed_str="";
-        if (str == "b") {
-            b_count++;
-            if (b_count==8) {  // If we've encountered 8 consecutive 'b's
-                B_count++;
-                b_count=0;
-            }
-            if(B_count==12){
-              F_count++;
-              B_count=0;
-            }
-        } else {
-            processed_str.append(F_count, 'F');
-            processed_str.append(B_count, 'B');
-            processed_str.append(b_count, '.');
-            b_count=0;
-            B_count=0;
-            F_count=0;
-            processed_str += " "+str;
+    for (const auto &str : pulse_strings_) {
+      processed_str = "";
+      if (str == "b") {
+        b_count++;
+        if (b_count == 8) {  // If we've encountered 8 consecutive 'b's
+          B_count++;
+          b_count = 0;
         }
-      
-        if (log_chunk.length() + processed_str.length() + 1 > max_chunk_length) {
-            ESP_LOGV(TAG_PULSES, "%s", log_chunk.c_str());
-            log_chunk.clear();
+        if (B_count == 12) {
+          F_count++;
+          B_count = 0;
         }
+      } else {
+        processed_str.append(F_count, 'F');
+        processed_str.append(B_count, 'B');
+        processed_str.append(b_count, '.');
+        b_count = 0;
+        B_count = 0;
+        F_count = 0;
+        processed_str += " " + str;
+      }
 
-        log_chunk += processed_str;
+      if (log_chunk.length() + processed_str.length() + 1 > max_chunk_length) {
+        ESP_LOGV(TAG_PULSES, "%s", log_chunk.c_str());
+        log_chunk.clear();
+      }
+
+      log_chunk += processed_str;
     }
     log_chunk.append(F_count, 'F');
     log_chunk.append(B_count, 'B');
     log_chunk.append(b_count, 'b');
-    log_chunk+=" END.";
+    log_chunk += " END.";
     ESP_LOGV(TAG_PULSES, "%s", log_chunk.c_str());
     reset_pulse_log();
-}
-  bool is_changed(const BaseFrame& frame);
+  }
+  bool is_changed(const BaseFrame &frame);
   void reset_pulse_log() { pulse_strings_.clear(); }
-  void store_frame(const BaseFrame& frame);
-  BaseFrame* get_previous(const BaseFrame& frame);
+  void store_frame(const BaseFrame &frame);
+  BaseFrame *get_previous(const BaseFrame &frame);
 };
 
 }  // namespace hayward_pool_heater

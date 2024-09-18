@@ -33,8 +33,9 @@
 #include "HPBusDriver.h"
 
 #include "HPUtils.h"
-#include "esp32/clk.h"
 #include "esphome/core/log.h"
+#include "esphome/core/hal.h"
+
 
 #ifdef USE_ESP32
 #include <freertos/FreeRTOS.h>
@@ -60,6 +61,8 @@ const uint32_t single_frame_max_duration_ms =
 const char *TAG_BUS = "hayward_pool_heater.bus";
 const char *TAG = "hayward_pool_heater.driver";
 const char *TAG_PACKET = "pk";
+
+
 
 HPBusDriver::HPBusDriver(size_t maxWriteLength, size_t transmitCount)
     : mode(BUSMODE_RX),
@@ -178,6 +181,7 @@ void IRAM_ATTR HPBusDriver::isr_handler() {
     this->current_pulse_.duration1 = this->elapsed(now);
     BaseType_t res =
         xRingbufferSendFromISR(this->rb_, (void *) &this->current_pulse_, sizeof(this->current_pulse_), &HPTaskAwoken);
+
     // reset for next pass
     memset((void *) &this->current_pulse_, 0x00, sizeof(this->current_pulse_));
   }
