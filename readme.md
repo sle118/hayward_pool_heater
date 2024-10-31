@@ -3,10 +3,23 @@
 This project is a continuation and enhancement of the original work by [njanik](https://github.com/njanik/hayward-pool-heater-mqtt), which focused on interfacing with Hayward pool heaters using MQTT. This new project aims to integrate the Hayward pool heater communication into the ESPHome ecosystem, enabling seamless integration with Home Assistant and providing more control and monitoring capabilities.
 
 ## CURRENT PROJECT STATE -- READ FIRST !
-**This code is running on my own heat pump in passive mode. That is, it is now capturing packets, which helps me investigate the protocol. I still don't feel confident that we should be sending commands with it, mainly because I still have an uncertainty as to where the setpoint temperature lives. There actually seem to be two of them, one for heating the water and one for cooling it when it becomes too warm and when the pool heat pump is configured in auto mode with dual set points. It is safe to use if you want to help analyze the protocol and contribute to this effort, but you should probably not try to command the heat pump at this point.**
 
-** !!! you have been warned !! **
+This code is running on my own heat pump mostly in passive mode right now because summer is over and the pool is closed. I have done several tests with the active mode and feel somewhat confident that what is currently implemented with work and what would not wasn't enabled in the code.
 
+It was safe to use for me, but as usual with open source code, at your own risk.
+
+## Current state of the project
+A lot of spare time was spent over a long period of time, with the initial goal of reverse engineering the protocol used by the Hayward pool heater. In order to simplify the analysis, I've crafted packet logging in such way that changes are highlighted so that I could observe the data while manipulating the configuration on the device. The majority of the packet content was identified by changing parameters back and forth as they are found in the technical manual found in the documents section of this project.
+
+Packet type names are still not finalized and seem t encompass 3 main types:
+
+- Clock: This packet is sent by the controller every minute, most likely to support the ability of the heat pump to support timed operations, for example for the fan speed.
+- Configuration: Sent on average every 5 seconds or every 11 seconds, depending on the type. Several packet types encompass the full configuration of the heat pump, such as the operating mode, temperature, the mode restriction (cooling only, heating only, no restriction), the fan mode (low, high, timed, etc.), as well as some upper/lower limits for each set point (auto, cooling, heating). 
+- Condition: Sent on average every 5 seconds or every 11 seconds, depending on the type. This packet type is sent by the heat pump to notify the controller of various state values such as temperatures for coil, inlet, outlet, ambient, etc. It also contains some indicators for fan state (off, high, low), the compressor state (off, on), etc.
+
+Several of configuration attributes are exposed as a user modifiable input in home assistant, but I have left what I believe are critical ones as read only for now since messing up with their values could damage the heat pump itself. It is still possible to modify them if you want to, by following the procedure highlighted in the technical manual.
+
+Some sensors are implemented but they are still not properly located in individual packets and any help here would be greatly appreciated. 
 
 
 ## Supported Devices
@@ -87,7 +100,7 @@ Create a new ESPHome configuration file (e.g., `pool_heater.yaml`) with the foll
 
 ```yaml
 climate:
-  - platform: hayward_pool_heater
+  - platform: hwp
     id: pool_heater
     name: "Pool Heater"
     max_buffer_count: 8
@@ -100,11 +113,11 @@ climate:
 #### Shortest Configuration Example
 ```yaml
 climate:
-  - platform: hayward_pool_heater
+  - platform: hwp
     pin_txrx: GPIO14
 ```
 #### Custom Component
-Place the custom component files in the custom_components/hayward_pool_heater directory within your ESPHome configuration directory.
+Place the custom component files in the custom_components/hwp directory within your ESPHome configuration directory.
 
 
 ### Future Goals

@@ -1,0 +1,15 @@
+# Gitignore settings for ESPHome
+# This is an example and may include too much for your use-case.
+# You can modify this file to suit your needs.
+/.esphome/
+/secrets.yaml
+/esphome_build
+/backup
+analysis/startlog.sh
+analysis/.vscode/launch.json
+.vscode/launch.json
+.vscode/tasks.json
+analysis/piscine_esphome_logs.log
+components/hwp/.vscode/launch.json
+components/hwp/.vscode/tasks.json
+hayward-heater-test.yaml
