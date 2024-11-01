@@ -2,7 +2,11 @@
 
 This project is a continuation and enhancement of the original work by [njanik](https://github.com/njanik/hayward-pool-heater-mqtt), which focused on interfacing with Hayward pool heaters using MQTT. This new project aims to integrate the Hayward pool heater communication into the ESPHome ecosystem, enabling seamless integration with Home Assistant and providing more control and monitoring capabilities.
 
-## CURRENT PROJECT STATE -- READ FIRST !
+## Introduction
+
+This project allows you to control and monitor your Hayward pool heater through Home Assistant using ESPHome. It supports receiving current parameters and sending commands to the heat pump, providing a comprehensive solution for pool heater automation. 
+
+## READ FIRST !
 
 This code is running on my own heat pump mostly in passive mode right now because summer is over and the pool is closed. I have done several tests with the active mode and feel somewhat confident that what is currently implemented with work and what would not wasn't enabled in the code.
 
@@ -21,6 +25,10 @@ Several of configuration attributes are exposed as a user modifiable input in ho
 
 Some sensors are implemented but they are still not properly located in individual packets and any help here would be greatly appreciated. 
 
+![image](https://github.com/user-attachments/assets/9b4c4c3f-089b-4ea6-93f9-9621bd967ba4)
+![image](https://github.com/user-attachments/assets/30556d5b-51f3-4525-8e84-1f803e3f071b)
+![image](https://github.com/user-attachments/assets/74d0d834-beb3-4d47-8349-582788f7b5d2)
+
 
 ## Supported Devices
 
@@ -31,13 +39,8 @@ The following pool heaters have been tested and are known to be compatible with 
 - **Majestic** heat pump (Hayward white label) using a **PC1001** controller.
 - **CPAC111** heat pump (Hayward) using a **PC1001** controller.
 
-## Introduction
-
-This project allows you to control and monitor your Hayward pool heater through Home Assistant using ESPHome. It supports receiving current parameters and sending commands to the heat pump, providing a comprehensive solution for pool heater automation. 
-
 
 ## Features
-
 - **Receive Current Parameters:** Get real-time data from your pool heater, including temperatures and operating modes.
 - **Send Commands:** Control your pool heater by sending commands such as setting the mode, adjusting temperatures, and turning the heater on or off.
 - **Seamless Integration with Home Assistant:** Utilize the powerful capabilities of Home Assistant to automate and monitor your pool heater.
@@ -96,29 +99,20 @@ By following these detailed steps, you can correctly connect the ESP32 to the Ha
 
 Create a new ESPHome configuration file (e.g., `pool_heater.yaml`) with the following content:
 
-#### Full Configuration Example
+#### Configuration Example
+Assuming you have the level shifter connected to pin 22. 
 
 ```yaml
+external_components:
+  - source: github://sle118/hayward_pool_heater
+    components: hwp
+
 climate:
   - platform: hwp
     id: pool_heater
     name: "Pool Heater"
-    max_buffer_count: 8
-    pin_txrx: GPIO14
-    active_mode_switch:
-      name: "Active mode"
-      restore_mode: RESTORE_DEFAULT_OFF
+    pin_txrx: GPIO22 
 ```
-
-#### Shortest Configuration Example
-```yaml
-climate:
-  - platform: hwp
-    pin_txrx: GPIO14
-```
-#### Custom Component
-Place the custom component files in the custom_components/hwp directory within your ESPHome configuration directory.
-
 
 ### Future Goals
 This project aims to eventually be merged into the official ESPHome repository, making it easier for users to integrate and use the Hayward pool heater component. Before it can get there, more protocol analysis will be needed, especially to understand how states are communicated back (compressor running/standby, etc). For example, these error conditions should be decoded:
