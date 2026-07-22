@@ -59,7 +59,7 @@ climate:
 - The remaining ignored annotation logs and Arduino simulator packets are inventoried by `python -m analysis.hwp_analyze evidence --limit 25`. The current scan found 65 annotation windows, 54 packet-bearing windows, and 43 simulator packets. All F01-F13 fan packet windows are now tracked; remaining uncovered annotation windows are non-fan 2024-10-31 condition/clock/test snippets.
 - Technical manual menu options are mapped to frame/byte/encoding/evidence status in `docs/protocol/menu-packet-map.md`, with machine-readable metadata in `analysis/hwp_menu_map.py`. Check this map before adding or exposing protocol behavior.
 - Uncertain or unknown fields are tracked in `docs/protocol/research-backlog.md` so they can be revisited with human review and future analysis tooling instead of drifting into implementation by accident.
-- Community installation examples live under `docs/success-stories/`. The first tracked story preserves discussion #9's HP55TR E08 bypass report, local photos, and Home Assistant result as documentation evidence only.
+- Community installation examples live under `docs/success-stories/`. The tracked reports preserve discussion #9's HP55TR E08 bypass result and discussion #17's HP65A/PC1000 compatibility report, with local photos, as documentation evidence only.
 - Fan field candidates from the tmp tree are reviewed in `docs/protocol/fan-field-review.md` and covered by fixture-backed Python tests.
 - Runtime decode naming for F02-F09, F10, F11, and F13 is merged in the frame structs. F10/F11 dependency-light conversions are covered in `protocol_core`.
 - Runtime `FrameConf1/2/4/5` matching and parsing are covered by adapter-backed native tests against the F01-F13 packet contracts.

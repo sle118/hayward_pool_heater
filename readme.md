@@ -41,7 +41,7 @@ The following pool heaters have been tested and are known to be compatible with 
 
 ## Success Stories
 
-Community examples are collected under [docs/success-stories](docs/success-stories/index.md). The first tracked story documents a reported [Hayward HP55TR E08 bypass and Home Assistant control installation](docs/success-stories/hp55tr-e08-bypass.md) with photos of the PC1000 connection, ESP32/level-shifter wiring, enclosure, and Home Assistant climate entity.
+Community examples are collected under [docs/success-stories](docs/success-stories/index.md). They include a reported [Hayward HP55TR E08 bypass and Home Assistant control installation](docs/success-stories/hp55tr-e08-bypass.md) and an [HP65A/PC1000 compatibility report](docs/success-stories/hp65a-pc1000.md).
 
 
 ## Features
